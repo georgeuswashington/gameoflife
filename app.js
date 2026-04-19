@@ -27,12 +27,19 @@ const SHOP_ITEMS = {
     { id: "washer", name: "Стиральная машина", price: 3100, comfort: 50, powerPerHour: 0.07, durability: 1000 },
     { id: "coffee", name: "Кофе-машина", price: 1400, comfort: 25, moodBoost: 30, powerPerHour: 0.03, durability: 1000 },
     { id: "kettle", name: "Электрочайник", price: 800, comfort: 15, powerPerHour: 0.02, durability: 1000 },
+    { id: "microwave", name: "Микроволновка", price: 1900, comfort: 22, powerPerHour: 0.05, durability: 1000 },
+    { id: "vacuum", name: "Робот-пылесос", price: 3600, comfort: 58, powerPerHour: 0.04, durability: 1000 },
+    { id: "airpurifier", name: "Очиститель воздуха", price: 2700, comfort: 35, powerPerHour: 0.03, durability: 1000 },
   ],
   home: [
     { id: "table", name: "Стол", price: 700, comfort: 35, durability: 1000 },
     { id: "chair", name: "Стул", price: 260, comfort: 15, durability: 1000 },
     { id: "armchair", name: "Кресло", price: 900, comfort: 45, durability: 1000 },
     { id: "lamp", name: "Торшер", price: 520, comfort: 20, powerPerHour: 0.02, durability: 1000 },
+    { id: "shelf", name: "Стеллаж", price: 780, comfort: 28, durability: 1000 },
+    { id: "curtains", name: "Шторы", price: 640, comfort: 18, durability: 1000 },
+    { id: "carpet", name: "Ковёр", price: 1100, comfort: 33, durability: 1000 },
+    { id: "dresser", name: "Комод", price: 1250, comfort: 30, durability: 1000 },
   ],
 };
 
@@ -56,6 +63,7 @@ let uiState = {
   scroll: {
     windowY: 0,
     feedTop: 0,
+    wasAtBottom: false,
   },
   expandedJobCards: [],
   forceTopOnRender: false,
@@ -70,10 +78,12 @@ function captureScrollState() {
     return;
   }
   const feed = document.querySelector(".feed");
+  const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
   const openedJobs = Array.from(document.querySelectorAll("details[data-job-card][open]")).map((el) => el.dataset.jobCard);
   uiState.expandedJobCards = openedJobs;
   uiState.scroll.windowY = window.scrollY || 0;
   uiState.scroll.feedTop = feed ? feed.scrollTop : 0;
+  uiState.scroll.wasAtBottom = maxScroll > 0 && Math.abs((window.scrollY || 0) - maxScroll) <= 4;
 }
 
 function restoreScrollState() {
@@ -84,7 +94,11 @@ function restoreScrollState() {
     });
   }
   if (typeof uiState.scroll.windowY === "number") {
-    window.scrollTo({ top: uiState.scroll.windowY, behavior: "auto" });
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const target = uiState.scroll.wasAtBottom ? maxScroll : Math.min(uiState.scroll.windowY, maxScroll);
+    if (Math.abs((window.scrollY || 0) - target) > 1) {
+      window.scrollTo({ top: target, behavior: "auto" });
+    }
   }
   const feed = document.querySelector(".feed");
   if (feed) {
@@ -155,6 +169,7 @@ function createProfile(name, difficulty = "normal") {
       currentJobId: "courier",
       levels: { courier: 1, callcenter: 1, warehouse: 1 },
       rep: { courier: 500, callcenter: 400, warehouse: 400 },
+      workedMinutesByJob: { courier: 0, callcenter: 0, warehouse: 0 },
       workedMinutesInMonth: 0,
       accruedSalary: 0,
       lastSalaryMonthKey: monthKey(now),
@@ -206,6 +221,8 @@ function getProfile() {
       : null;
   }
   p.meta = p.meta || {};
+  p.career = p.career || {};
+  p.career.workedMinutesByJob = p.career.workedMinutesByJob || { courier: 0, callcenter: 0, warehouse: 0 };
   p.meta.lastTeethAt = p.meta.lastTeethAt || p.gameTime;
   p.meta.lastShowerAt = p.meta.lastShowerAt || p.gameTime;
   return p;
@@ -481,10 +498,11 @@ function authMarkup() {
   </div>`;
 }
 
-function statLine(name, value) {
+function statLine(name, value, options = {}) {
+  const { showValue = true } = options;
   const pct = Math.round((value / 1000) * 100);
   const color = pct < 20 ? "var(--danger)" : pct < 45 ? "#d59012" : "var(--ok)";
-  return `<div class="stat"><div class="stat-head"><span>${name}</span><b>${value}</b></div><div class="bar"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div></div>`;
+  return `<div class="stat"><div class="stat-head"><span>${name}</span>${showValue ? `<b>${value}</b>` : ""}</div><div class="bar"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div></div>`;
 }
 
 function infoTile(name, value, extra = "") {
@@ -495,6 +513,16 @@ function dayProgressValue(isoTime) {
   const d = new Date(isoTime);
   const minutes = d.getUTCHours() * 60 + d.getUTCMinutes();
   return Math.round((minutes / (24 * 60)) * 1000);
+}
+
+function fmtGameDateTime(isoTime) {
+  return new Date(isoTime).toLocaleString("ru-RU", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function overallReputation(p) {
@@ -519,6 +547,33 @@ function monthlySalaryForLevel(jobId, level = 1) {
   return Math.round(base * 160 * (1 + level * 0.07));
 }
 
+function getPromotionThresholds(jobId, nextLevel) {
+  return {
+    minutesRequired: Math.max(240, nextLevel * 360),
+    repRequired: Math.min(1000, 420 + nextLevel * 70 + (jobId === "warehouse" ? 20 : 0)),
+  };
+}
+
+function promotionProgress(profile, jobId) {
+  const currentLevel = profile.career.levels[jobId] || 1;
+  const nextLevel = Math.min(10, currentLevel + 1);
+  const workedMinutes = profile.career.workedMinutesByJob?.[jobId] || 0;
+  const rep = profile.career.rep?.[jobId] || 0;
+  const { minutesRequired, repRequired } = getPromotionThresholds(jobId, nextLevel);
+  const timePct = Math.min(100, Math.round((workedMinutes / minutesRequired) * 100));
+  const repPct = Math.min(100, Math.round((rep / repRequired) * 100));
+  return {
+    nextLevel,
+    workedMinutes,
+    rep,
+    minutesRequired,
+    repRequired,
+    timePct,
+    repPct,
+    eligible: workedMinutes >= minutesRequired || rep >= repRequired,
+  };
+}
+
 function getOwnedItemIds(p) {
   return new Set((p.housing.items || []).map((i) => i.id));
 }
@@ -532,7 +587,6 @@ function cartTotal(p) {
 }
 
 function gameMarkup(p) {
-  const gt = new Date(p.gameTime);
   const loc = LOCATIONS.find((l) => l.id === p.location)?.label || p.location;
   const dayProgress = dayProgressValue(p.gameTime);
   const rep = overallReputation(p);
@@ -553,7 +607,8 @@ function gameMarkup(p) {
           ${statLine("Гигиена", p.stats.hygiene)}
           ${statLine("Комфорт", p.stats.comfort)}
           ${infoTile("Баланс", `${fmtMoney(p.money)} €`)}
-          ${statLine("Время суток", dayProgress)}
+          ${infoTile("Дата и время", fmtGameDateTime(p.gameTime))}
+          ${statLine("Суточный прогресс", dayProgress, { showValue: false })}
           ${statLine("Репутация", rep)}
         </div>
       </section>
@@ -567,7 +622,7 @@ function gameMarkup(p) {
 
         <section class="feed">
           <h3 style="margin-top:0">Игровые события</h3>
-          ${p.logs.events.slice(0, 30).map((n) => `<div class="feed-item ${n.type}"><div>${n.text}</div><div class="t">${new Date(n.ts).toLocaleString("ru-RU")}</div>${n.target ? `<button data-go="${n.target}">Перейти</button>` : ""}${n.action ? `<button data-do="${n.action}">Выполнить</button>` : ""}</div>`).join("") || "<small class='note'>Пока пусто.</small>"}
+          ${p.logs.events.slice(0, 30).map((n) => `<div class="feed-item ${n.type} ${n.target ? "clickable" : ""}" ${n.target ? `data-go="${n.target}" title="Открыть раздел"` : ""}><div class="feed-item-row"><div>${n.text}</div>${n.target ? `<span class="feed-go-icon" aria-hidden="true">↗</span>` : ""}</div><div class="t">${new Date(n.ts).toLocaleString("ru-RU")}</div>${n.action ? `<button data-do="${n.action}">Выполнить</button>` : ""}</div>`).join("") || "<small class='note'>Пока пусто.</small>"}
 
           <h3>Журнал действий</h3>
           ${p.logs.actions.slice(0, 25).map((a) => `<div class="feed-item"><div>${a.text}</div><div class="t">${new Date(a.ts).toLocaleString("ru-RU")}</div></div>`).join("") || "<small class='note'>Нет записей.</small>"}
@@ -631,11 +686,13 @@ function renderLocationActions(p) {
   }
 
   if (p.location === "work") {
+    const progress = promotionProgress(p, p.career.currentJobId);
     return [
       `<div class="job-status"><b>${job.name}</b><div>Накоплено к выплате: <b>${fmtMoney(p.career.accruedSalary)} €</b></div><div>До выплаты: <b>${daysToSalary(p)} дн.</b></div><div>Репутация: ${p.career.rep[p.career.currentJobId]} | Уровень: ${p.career.levels[p.career.currentJobId]}</div></div>`,
+      `<div class="job-status"><b>Готовность к повышению (до уровня ${progress.nextLevel})</b><div style="margin-top:6px">Стаж на должности: ${Math.floor(progress.workedMinutes / 60)} ч / ${Math.floor(progress.minutesRequired / 60)} ч</div><div class="bar"><div class="bar-fill" style="width:${progress.timePct}%"></div></div><div style="margin-top:6px">Репутация: ${progress.rep} / ${progress.repRequired}</div><div class="bar"><div class="bar-fill" style="width:${progress.repPct}%"></div></div><small class="note">Повышение возможно при выполнении хотя бы одного условия.</small></div>`,
       actionBtn("Работать 2 часа", "Опыт и накопление к месячной зарплате.", "work2", 2 * 60),
       actionBtn("Работать 8 часов", "Основная смена.", "work8", 8 * 60),
-      actionBtn("Подать на повышение", "Шанс получить +1 уровень.", "promotion", 30),
+      actionBtn("Подать на повышение", "Требуется стаж на должности или достаточная репутация.", "promotion", 30),
     ].join("");
   }
 
@@ -929,14 +986,16 @@ function doAction(rawKey) {
     case "promotion": {
       advanceGameMinutes(p, 30, "Подача заявки на повышение");
       const jobId = p.career.currentJobId;
-      const rep = p.career.rep[jobId];
-      const chance = 0.18 + rep / 6000;
-      if (Math.random() < chance && p.career.levels[jobId] < 10) {
+      const prog = promotionProgress(p, jobId);
+      if (p.career.levels[jobId] >= 10) {
+        pushEvent(p, `Достигнут максимальный уровень в должности ${JOBS[jobId].name}.`, "info", "work");
+      } else if (prog.eligible) {
         p.career.levels[jobId] += 1;
+        p.career.workedMinutesByJob[jobId] = 0;
         pushEvent(p, `Повышение! ${JOBS[jobId].name} уровень ${p.career.levels[jobId]}.`, "info", "work");
       } else {
         shiftStat(p, "mood", -20);
-        pushEvent(p, "В повышении отказано. Попробуйте позже.", "info", "work");
+        pushEvent(p, `В повышении отказано: нужно ${Math.floor(prog.minutesRequired / 60)} ч стажа или репутация ${prog.repRequired}.`, "info", "work");
       }
       break;
     }
@@ -1075,6 +1134,7 @@ function doWorkHours(hours) {
   const accrued = Math.round(hours * job.baseHourly * (1 + lvl * 0.07) * (0.7 + efficiency));
   p.career.accruedSalary += accrued;
   p.career.workedMinutesInMonth += hours * 60;
+  p.career.workedMinutesByJob[jobId] += hours * 60;
   p.career.rep[jobId] = clamp(p.career.rep[jobId] + Math.round(12 * efficiency - 2));
   shiftStat(p, "stress", job.stressPerHour * hours);
   shiftStat(p, "energy", -25 * hours);
