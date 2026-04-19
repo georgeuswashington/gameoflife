@@ -77,18 +77,18 @@ function captureScrollState() {
 }
 
 function restoreScrollState() {
-  const feed = document.querySelector(".feed");
-  if (feed) {
-    feed.scrollTop = uiState.scroll.feedTop || 0;
-  }
-  if (typeof uiState.scroll.windowY === "number") {
-    window.scrollTo({ top: uiState.scroll.windowY, behavior: "auto" });
-  }
   if (uiState.expandedJobCards?.length) {
     uiState.expandedJobCards.forEach((id) => {
       const el = document.querySelector(`details[data-job-card="${id}"]`);
       if (el) el.open = true;
     });
+  }
+  if (typeof uiState.scroll.windowY === "number") {
+    window.scrollTo({ top: uiState.scroll.windowY, behavior: "auto" });
+  }
+  const feed = document.querySelector(".feed");
+  if (feed) {
+    feed.scrollTop = uiState.scroll.feedTop || 0;
   }
 }
 
