@@ -50,7 +50,29 @@ const LOCATIONS = [
 let db = loadDB();
 let currentProfileId = db.lastProfileId || null;
 let popupTimeout = null;
-let uiState = { modalItemId: null };
+let uiState = {
+  modalItemId: null,
+  scroll: {
+    windowY: 0,
+    feedTop: 0,
+  },
+};
+
+function captureScrollState() {
+  const feed = document.querySelector(".feed");
+  uiState.scroll.windowY = window.scrollY || 0;
+  uiState.scroll.feedTop = feed ? feed.scrollTop : 0;
+}
+
+function restoreScrollState() {
+  const feed = document.querySelector(".feed");
+  if (feed) {
+    feed.scrollTop = uiState.scroll.feedTop || 0;
+  }
+  if (typeof uiState.scroll.windowY === "number") {
+    window.scrollTo({ top: uiState.scroll.windowY, behavior: "auto" });
+  }
+}
 
 function loadDB() {
   try {
@@ -359,10 +381,12 @@ function maybeTriggerRandomEvent(profile) {
 }
 
 function render() {
+  captureScrollState();
   const app = document.getElementById("app");
   const p = getProfile();
   app.innerHTML = p ? gameMarkup(p) : authMarkup();
   bindHandlers();
+  restoreScrollState();
 }
 
 function authMarkup() {

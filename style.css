@@ -192,6 +192,8 @@ small.note { color: var(--muted); }
 .feed {
   max-height: 70vh;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .feed-item {
   border-bottom: 1px solid var(--line);
