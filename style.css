@@ -150,6 +150,19 @@ small.note { color: var(--muted); }
   align-items: center;
   gap: 10px;
 }
+.action-item summary {
+  cursor: pointer;
+}
+.urgent-item {
+  border-color: #e19b2f;
+  background: #fff8ea;
+}
+.urgent-btn {
+  border-color: #d56d00;
+  background: #ffedd2;
+  color: #8a3f00;
+  font-weight: 600;
+}
 
 .job-status,
 .utility-card,

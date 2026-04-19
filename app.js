@@ -120,6 +120,11 @@ function createProfile(name, difficulty = "normal") {
         makeFoodItem(SHOP_ITEMS.groceries[1], "pantry"),
       ],
     },
+    shopCart: [],
+    houseNeeds: {
+      dirtyDishes: 0,
+      dirtySince: null,
+    },
     housing: {
       items: [
         { id: "mattress", name: "Матрас", wear: 900, comfort: 20 },
@@ -137,8 +142,8 @@ function createProfile(name, difficulty = "normal") {
       lastSalaryMonthKey: monthKey(now),
     },
     bank: {
-      credit: 0,
-      deposit: 0,
+      credit: { principal: 0, balance: 0, startedAt: null },
+      deposit: null,
     },
     logs: {
       events: [],
@@ -157,6 +162,8 @@ function createProfile(name, difficulty = "normal") {
       lastFoodDayKey: dayKey(now),
       lastPenaltyDayKey: dayKey(now),
       lastEventMinuteTs: 0,
+      lastTeethAt: now.toISOString(),
+      lastShowerAt: now.toISOString(),
     },
   };
   db.lastProfileId = id;
@@ -166,7 +173,24 @@ function createProfile(name, difficulty = "normal") {
 }
 
 function getProfile() {
-  return currentProfileId ? db.profiles[currentProfileId] : null;
+  if (!currentProfileId || !db.profiles[currentProfileId]) return null;
+  const p = db.profiles[currentProfileId];
+  p.shopCart = p.shopCart || [];
+  p.houseNeeds = p.houseNeeds || { dirtyDishes: 0, dirtySince: null };
+  if (!p.bank || typeof p.bank !== "object") p.bank = {};
+  if (typeof p.bank.credit === "number") {
+    p.bank.credit = { principal: p.bank.credit, balance: p.bank.credit, startedAt: p.meta?.createdAt || new Date().toISOString() };
+  }
+  p.bank.credit = p.bank.credit || { principal: 0, balance: 0, startedAt: null };
+  if (typeof p.bank.deposit === "number") {
+    p.bank.deposit = p.bank.deposit > 0
+      ? { principal: p.bank.deposit, balance: p.bank.deposit, rateAnnual: 0.08, termMonths: 6, startedAt: new Date().toISOString(), endAt: new Date().toISOString() }
+      : null;
+  }
+  p.meta = p.meta || {};
+  p.meta.lastTeethAt = p.meta.lastTeethAt || p.gameTime;
+  p.meta.lastShowerAt = p.meta.lastShowerAt || p.gameTime;
+  return p;
 }
 
 function monthKey(d) {
@@ -302,14 +326,14 @@ function processMonthChange(profile) {
     pushEvent(profile, `Начислена зарплата: +${fmtMoney(paid)} €.`, "info", "work");
   }
 
-  if (profile.bank.deposit > 0) {
-    const gain = Math.round(profile.bank.deposit * (0.08 / 12));
-    profile.bank.deposit += gain;
+  if (profile.bank.deposit?.balance > 0) {
+    const gain = Math.round(profile.bank.deposit.balance * ((profile.bank.deposit.rateAnnual || 0.08) / 12));
+    profile.bank.deposit.balance += gain;
     pushEvent(profile, `Вклад принёс +${fmtMoney(gain)} €.`, "info", "bank");
   }
-  if (profile.bank.credit > 0) {
-    const fee = Math.round(profile.bank.credit * (0.18 / 12));
-    profile.bank.credit += fee;
+  if (profile.bank.credit?.balance > 0) {
+    const fee = Math.round(profile.bank.credit.balance * (0.18 / 12));
+    profile.bank.credit.balance += fee;
     pushEvent(profile, `Начислены проценты по кредиту: +${fmtMoney(fee)} € к долгу.`, "info", "bank");
   }
 }
@@ -342,6 +366,21 @@ function applyMinuteTick(profile) {
   if (profile.stats.hunger < 180) {
     shiftStat(profile, "health", -0.2 * profile.speed);
     shiftStat(profile, "stress", 0.3 * profile.speed);
+  }
+  const gtNow = new Date(profile.gameTime);
+  const teethHours = (gtNow - new Date(profile.meta.lastTeethAt)) / (1000 * 60 * 60);
+  const showerHours = (gtNow - new Date(profile.meta.lastShowerAt)) / (1000 * 60 * 60);
+  if (teethHours > 24) {
+    shiftStat(profile, "hygiene", -0.45 * profile.speed);
+    shiftStat(profile, "health", -0.25 * profile.speed);
+  }
+  if (showerHours > 30) {
+    shiftStat(profile, "hygiene", -0.3 * profile.speed);
+    shiftStat(profile, "mood", -0.22 * profile.speed);
+  }
+  if (profile.houseNeeds?.dirtyDishes > 0) {
+    shiftStat(profile, "comfort", -0.08 * profile.speed);
+    shiftStat(profile, "mood", -0.06 * profile.speed);
   }
 
   if (monthKey(profile.gameTime) !== prevMonth) {
@@ -437,6 +476,27 @@ function daysToSalary(p) {
   return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
 }
 
+function hoursSince(gameTime, isoTime) {
+  return Math.max(0, Math.floor((new Date(gameTime) - new Date(isoTime)) / (1000 * 60 * 60)));
+}
+
+function monthlySalaryForLevel(jobId, level = 1) {
+  const base = JOBS[jobId].baseHourly;
+  return Math.round(base * 160 * (1 + level * 0.07));
+}
+
+function getOwnedItemIds(p) {
+  return new Set((p.housing.items || []).map((i) => i.id));
+}
+
+function getCartQuantity(p, type, id) {
+  return p.shopCart.filter((x) => x.type === type && x.id === id).reduce((sum, x) => sum + x.qty, 0);
+}
+
+function cartTotal(p) {
+  return p.shopCart.reduce((sum, item) => sum + item.price * item.qty, 0);
+}
+
 function gameMarkup(p) {
   const gt = new Date(p.gameTime);
   const loc = LOCATIONS.find((l) => l.id === p.location)?.label || p.location;
@@ -528,19 +588,24 @@ function renderItemModal(p) {
 }
 
 function actionBtn(title, desc, key, minutes) {
-  return `<div class="action-item"><div><b>${title}</b><div style="color:var(--muted);font-size:13px">${desc}</div><small>Время: ${minutes >= 60 ? `${Math.floor(minutes / 60)} ч ${minutes % 60} мин` : `${minutes} мин`}</small></div><button data-do="${key}">Выполнить</button></div>`;
+  const urgent = String(desc).includes("[!]");
+  const safeDesc = String(desc).replace("[!]", "");
+  return `<div class="action-item ${urgent ? "urgent-item" : ""}"><div><b>${title}</b><div style="color:var(--muted);font-size:13px">${safeDesc}</div><small>Время: ${minutes >= 60 ? `${Math.floor(minutes / 60)} ч ${minutes % 60} мин` : `${minutes} мин`}</small></div><button class="${urgent ? "urgent-btn" : ""}" data-do="${key}">Выполнить</button></div>`;
 }
 
 function renderLocationActions(p) {
   const job = JOBS[p.career.currentJobId];
   if (p.location === "home") {
+    const teethHours = hoursSince(p.gameTime, p.meta.lastTeethAt);
+    const showerHours = hoursSince(p.gameTime, p.meta.lastShowerAt);
+    const dirty = p.houseNeeds?.dirtyDishes || 0;
     return [
       actionBtn("Сон (8 часов)", "Оптимальное восстановление параметров.", "sleep8", 8 * 60),
       actionBtn("Сон (2 часа)", "Быстрый отдых, слабый эффект.", "sleep2", 2 * 60),
-      actionBtn("Принять душ", "+гигиена, -стресс", "shower", 15),
-      actionBtn("Почистить зубы", "+гигиена, +настроение", "teeth", 6),
+      actionBtn("Принять душ", `${showerHours > 30 ? "[!] " : ""}+гигиена, -стресс. Последний душ: ${showerHours} ч назад.`, "shower", 15),
+      actionBtn("Почистить зубы", `${teethHours > 24 ? "[!] " : ""}+гигиена, +настроение. Последняя чистка: ${teethHours} ч назад.`, "teeth", 6),
       actionBtn("Поесть", "Съесть продукт из запасов.", "eat", 20),
-      actionBtn("Помыть посуду", "Небольшой рост комфорта.", "dishes", 12),
+      actionBtn("Помыть посуду", `${dirty > 0 ? "[!] " : ""}Грязной посуды: ${dirty}. Небольшой рост комфорта.`, "dishes", 12),
       actionBtn("Тренировка", "+здоровье, -стресс, -энергия", "workout", 45),
       actionBtn("Прогулка", "+настроение, +здоровье", "walk", 40),
     ].join("");
@@ -556,10 +621,12 @@ function renderLocationActions(p) {
   }
 
   if (p.location === "shops") {
-    const groceries = SHOP_ITEMS.groceries.map((g) => actionBtn(`Купить: ${g.name} (${g.price} €)`, `Питательность ${g.nutrition}, срок ${g.shelfDays} дн.`, `buyFood:${g.id}`, 15)).join("");
-    const appliances = SHOP_ITEMS.appliances.map((it) => actionBtn(`Техника: ${it.name} (${it.price} €)`, `Комфорт +${it.comfort || 0}`, `buyAppliance:${it.id}`, 25)).join("");
-    const homeGoods = SHOP_ITEMS.home.map((it) => actionBtn(`Для дома: ${it.name} (${it.price} €)`, `Комфорт +${it.comfort || 0}`, `buyHome:${it.id}`, 20)).join("");
-    return `<h4>Продукты</h4>${groceries}<h4>Бытовая техника</h4>${appliances}<h4>Всё для дома</h4>${homeGoods}`;
+    const owned = getOwnedItemIds(p);
+    const groceries = SHOP_ITEMS.groceries.map((g) => actionBtn(`Купить: ${g.name} (${g.price} €)`, `В корзине: ${getCartQuantity(p, "food", g.id)} шт. | Питательность ${g.nutrition}, срок ${g.shelfDays} дн.`, `cartAdd:food:${g.id}`, 2)).join("");
+    const appliances = SHOP_ITEMS.appliances.map((it) => actionBtn(`Техника: ${it.name} (${it.price} €)`, `${owned.has(it.id) ? "[Дома уже есть] " : ""}В корзине: ${getCartQuantity(p, "appliance", it.id)} шт. | Комфорт +${it.comfort || 0}`, `cartAdd:appliance:${it.id}`, 2)).join("");
+    const homeGoods = SHOP_ITEMS.home.map((it) => actionBtn(`Для дома: ${it.name} (${it.price} €)`, `${owned.has(it.id) ? "[Дома уже есть] " : ""}В корзине: ${getCartQuantity(p, "home", it.id)} шт. | Комфорт +${it.comfort || 0}`, `cartAdd:home:${it.id}`, 2)).join("");
+    const cartItems = p.shopCart.map((ci) => `<div class="mini-row"><b>${ci.name}</b> — ${ci.qty} шт. × ${ci.price} € = ${fmtMoney(ci.qty * ci.price)} € <button data-do="cartDec:${ci.type}:${ci.id}">-1</button></div>`).join("") || "<small>Корзина пуста.</small>";
+    return `<div class="utility-card"><b>Корзина</b><div>Товаров: ${p.shopCart.reduce((s, x) => s + x.qty, 0)} | Сумма: ${fmtMoney(cartTotal(p))} €</div>${cartItems}<div class="row"><button data-do="cartCheckout">Оформить покупку</button><button data-do="cartClear">Отменить всё</button></div></div><h4>Продукты</h4>${groceries}<h4>Бытовая техника</h4>${appliances}<h4>Всё для дома</h4>${homeGoods}`;
   }
 
   if (p.location === "utilities") {
@@ -577,10 +644,22 @@ function renderLocationActions(p) {
   }
 
   if (p.location === "bank") {
+    const dep = p.bank.deposit;
+    const credit = p.bank.credit;
+    const depositSummary = dep
+      ? `<div class="utility-card"><b>Активный вклад</b><div>Сумма: ${fmtMoney(dep.balance)} € (внесено ${fmtMoney(dep.principal)} €)</div><div>Ставка: ${(dep.rateAnnual * 100).toFixed(1)}% годовых, срок: ${dep.termMonths} мес.</div><div>Окончание: ${new Date(dep.endAt).toLocaleDateString("ru-RU")}</div><div>Ожидаемая выгода к концу срока: ${fmtMoney(Math.max(0, Math.round(dep.principal * ((1 + dep.rateAnnual / 12) ** dep.termMonths - 1))))} €</div></div>`
+      : `<div class="utility-card"><b>Вклад не открыт</b></div>`;
+    const creditSummary = credit?.balance > 0
+      ? `<div class="utility-card"><b>Кредит</b><div>Тело кредита: ${fmtMoney(credit.principal)} €</div><div>Текущий долг: ${fmtMoney(credit.balance)} €</div><div>Переплата: ${fmtMoney(Math.max(0, credit.balance - credit.principal))} €</div></div>`
+      : `<div class="utility-card"><b>Кредитов нет</b></div>`;
     return [
+      depositSummary,
+      creditSummary,
       actionBtn("Взять кредит 1000 €", "Годовая ставка 18%.", "takeCredit", 15),
       actionBtn("Погасить кредит 500 €", "Списывает из долга.", "payCredit", 10),
-      actionBtn("Открыть вклад 500 €", "Годовая ставка 8%.", "openDeposit", 10),
+      actionBtn("Открыть вклад 500 € на 3 мес", "Годовая ставка 8%.", "openDeposit:3", 10),
+      actionBtn("Открыть вклад 500 € на 6 мес", "Годовая ставка 8%.", "openDeposit:6", 10),
+      actionBtn("Открыть вклад 500 € на 12 мес", "Годовая ставка 8%.", "openDeposit:12", 10),
       actionBtn("Закрыть вклад", "Возврат вклада на баланс.", "closeDeposit", 10),
     ].join("");
   }
@@ -589,7 +668,8 @@ function renderLocationActions(p) {
     return Object.entries(JOBS).map(([id, j]) => {
       const lvl = p.career.levels[id];
       const rep = p.career.rep[id];
-      return `<div class="action-item"><div><b>${j.name}</b><div style="color:var(--muted);font-size:13px">Уровень ${lvl}, репутация ${rep}, тип: ${j.mode}${j.shift ? `, график: ${j.shift}` : ""}</div></div><button data-job="${id}">Выбрать</button></div>`;
+      const levelRows = Array.from({ length: 10 }).map((_, idx) => `<div class="mini-row">Уровень ${idx + 1}: ${fmtMoney(monthlySalaryForLevel(id, idx + 1))} €/мес</div>`).join("");
+      return `<details class="action-item"><summary><b>${j.name}</b> — текущий уровень ${lvl}, репутация ${rep}, базовый доход ${fmtMoney(monthlySalaryForLevel(id, lvl))} €/мес</summary><div style="color:var(--muted);font-size:13px;margin:6px 0">Тип: ${j.mode}${j.shift ? `, график: ${j.shift}` : ""}</div>${levelRows}<div class="row"><button data-job="${id}">Выбрать</button></div></details>`;
     }).join("");
   }
 
@@ -644,6 +724,56 @@ function addHousingItem(profile, itemDef) {
 function doAction(rawKey) {
   const p = getProfile();
   if (!p) return;
+
+  if (rawKey.startsWith("cartAdd:")) {
+    const [, type, id] = rawKey.split(":");
+    const catalog = type === "food" ? SHOP_ITEMS.groceries : type === "appliance" ? SHOP_ITEMS.appliances : SHOP_ITEMS.home;
+    const item = catalog.find((x) => x.id === id);
+    if (!item) return;
+    const owned = getOwnedItemIds(p);
+    if (type !== "food" && owned.has(id)) return pushEvent(p, `${item.name} уже есть дома.`, "info", "home");
+    const row = p.shopCart.find((x) => x.type === type && x.id === id);
+    if (row) row.qty += 1;
+    else p.shopCart.push({ type, id, qty: 1, name: item.name, price: item.price });
+    render();
+    return;
+  }
+  if (rawKey.startsWith("cartDec:")) {
+    const [, type, id] = rawKey.split(":");
+    const row = p.shopCart.find((x) => x.type === type && x.id === id);
+    if (!row) return;
+    row.qty -= 1;
+    p.shopCart = p.shopCart.filter((x) => x.qty > 0);
+    render();
+    return;
+  }
+  if (rawKey === "cartClear") {
+    p.shopCart = [];
+    render();
+    return;
+  }
+  if (rawKey === "cartCheckout") {
+    const total = cartTotal(p);
+    if (total <= 0) return;
+    if (p.money < total) return pushEvent(p, "Недостаточно денег для оплаты корзины.", "critical");
+    p.money -= total;
+    for (const ci of p.shopCart) {
+      if (ci.type === "food") {
+        const f = SHOP_ITEMS.groceries.find((x) => x.id === ci.id);
+        const hasFridge = p.housing.items.some((i) => i.id === "fridge");
+        for (let i = 0; i < ci.qty; i++) p.food.stock.push(makeFoodItem(f, f.fridgePreferred && hasFridge ? "fridge" : "pantry"));
+      } else {
+        const item = (ci.type === "appliance" ? SHOP_ITEMS.appliances : SHOP_ITEMS.home).find((x) => x.id === ci.id);
+        addHousingItem(p, item);
+      }
+    }
+    advanceGameMinutes(p, 20, "Покупки в магазине");
+    pushEvent(p, `Корзина оплачена: ${fmtMoney(total)} €.`, "info", "home");
+    p.shopCart = [];
+    persistDB();
+    render();
+    return;
+  }
 
   if (rawKey.startsWith("buyFood:")) {
     const id = rawKey.split(":")[1];
@@ -705,12 +835,14 @@ function doAction(rawKey) {
       advanceGameMinutes(p, 15, "Душ");
       shiftStat(p, "hygiene", 160);
       shiftStat(p, "stress", -40);
+      p.meta.lastShowerAt = p.gameTime;
       consumeUtilitiesForAction(p, { waterUse: 0.12, powerUse: 0.05 });
       break;
     case "teeth":
       advanceGameMinutes(p, 6, "Чистка зубов");
       shiftStat(p, "hygiene", 80);
       shiftStat(p, "mood", 20);
+      p.meta.lastTeethAt = p.gameTime;
       consumeUtilitiesForAction(p, { waterUse: 0.02 });
       break;
     case "eat": {
@@ -720,6 +852,10 @@ function doAction(rawKey) {
       advanceGameMinutes(p, 20, `Приём пищи: ${food.name}`);
       shiftStat(p, "hunger", food.satiety);
       shiftStat(p, "mood", Math.round(food.nutrition / 6));
+      if (food.id.includes("chicken")) {
+        p.houseNeeds.dirtyDishes += 1;
+        p.houseNeeds.dirtySince = p.houseNeeds.dirtySince || p.gameTime;
+      }
       break;
     }
     case "dishes": {
@@ -728,6 +864,8 @@ function doAction(rawKey) {
       shiftStat(p, "hygiene", 20);
       const hasDishwasher = p.housing.items.some((i) => i.id === "dishwasher");
       consumeUtilitiesForAction(p, { waterUse: hasDishwasher ? 0.03 : 0.08, powerUse: hasDishwasher ? 0.02 : 0 });
+      p.houseNeeds.dirtyDishes = 0;
+      p.houseNeeds.dirtySince = null;
       break;
     }
     case "workout":
@@ -769,28 +907,52 @@ function doAction(rawKey) {
     }
     case "takeCredit":
       advanceGameMinutes(p, 15, "Оформление кредита");
-      p.bank.credit += 1000;
+      p.bank.credit.principal += 1000;
+      p.bank.credit.balance += 1000;
+      p.bank.credit.startedAt = p.bank.credit.startedAt || p.gameTime;
       p.money += 1000;
       pushEvent(p, "Кредит оформлен: +1000 €.", "info", "bank");
       break;
     case "payCredit":
-      if (p.bank.credit <= 0) return;
+      if (p.bank.credit.balance <= 0) return;
       if (p.money < 500) return pushEvent(p, "Недостаточно денег для погашения.", "critical");
       advanceGameMinutes(p, 10, "Погашение кредита");
       p.money -= 500;
-      p.bank.credit = Math.max(0, p.bank.credit - 500);
+      p.bank.credit.balance = Math.max(0, p.bank.credit.balance - 500);
       break;
     case "openDeposit":
+      if (p.bank.deposit?.balance > 0) return pushEvent(p, "Сначала закройте текущий вклад.", "critical");
       if (p.money < 500) return pushEvent(p, "Недостаточно денег.", "critical");
       advanceGameMinutes(p, 10, "Открытие вклада");
       p.money -= 500;
-      p.bank.deposit += 500;
+      p.bank.deposit = {
+        principal: 500,
+        balance: 500,
+        rateAnnual: 0.08,
+        termMonths: 6,
+        startedAt: p.gameTime,
+        endAt: new Date(new Date(p.gameTime).setUTCMonth(new Date(p.gameTime).getUTCMonth() + 6)).toISOString(),
+      };
       break;
+    case "openDeposit:3":
+    case "openDeposit:6":
+    case "openDeposit:12": {
+      if (p.bank.deposit?.balance > 0) return pushEvent(p, "Сначала закройте текущий вклад.", "critical");
+      if (p.money < 500) return pushEvent(p, "Недостаточно денег.", "critical");
+      const months = Number(rawKey.split(":")[1]);
+      advanceGameMinutes(p, 10, `Открытие вклада на ${months} мес.`);
+      p.money -= 500;
+      const now = new Date(p.gameTime);
+      const end = new Date(now);
+      end.setUTCMonth(end.getUTCMonth() + months);
+      p.bank.deposit = { principal: 500, balance: 500, rateAnnual: 0.08, termMonths: months, startedAt: now.toISOString(), endAt: end.toISOString() };
+      break;
+    }
     case "closeDeposit":
-      if (p.bank.deposit <= 0) return;
+      if (!p.bank.deposit || p.bank.deposit.balance <= 0) return;
       advanceGameMinutes(p, 10, "Закрытие вклада");
-      p.money += p.bank.deposit;
-      p.bank.deposit = 0;
+      p.money += p.bank.deposit.balance;
+      p.bank.deposit = null;
       break;
     case "clinic":
       if (p.money < 200) return pushEvent(p, "Недостаточно денег.", "critical");
@@ -1023,6 +1185,8 @@ setInterval(() => {
   applyMinuteTick(p);
   p.meta.updatedAt = new Date().toISOString();
   persistDB();
+  const active = document.activeElement;
+  if (active && active.id === "speedSelect") return;
   render();
 }, TICK_MS);
 
