@@ -9,17 +9,17 @@ const DIFFICULTIES = {
 };
 
 const JOBS = {
-  courier: { name: "Курьер", mode: "flex", stressPerHour: 18, baseHourly: 11 },
-  callcenter: { name: "Оператор колл-центра", mode: "fixed", stressPerHour: 12, baseHourly: 10, shift: "09:00–18:00, 5/2" },
-  warehouse: { name: "Помощник на складе", mode: "shift", stressPerHour: 16, baseHourly: 12, shift: "2/2 по 12ч" },
+  courier: { name: "Курьер", mode: "flex", stressPerHour: 18, baseHourly: 11, unlockRep: 0 },
+  callcenter: { name: "Оператор колл-центра", mode: "fixed", stressPerHour: 12, baseHourly: 10, shift: "09:00–18:00, 5/2", unlockRep: 450 },
+  warehouse: { name: "Помощник на складе", mode: "shift", stressPerHour: 16, baseHourly: 12, shift: "2/2 по 12ч", unlockRep: 520 },
 };
 
 const SHOP_ITEMS = {
   groceries: [
-    { id: "apple", name: "Яблоко", price: 40, satiety: 80, nutrition: 45, shelfDays: 6, fridgePreferred: false },
-    { id: "milk", name: "Молоко", price: 90, satiety: 120, nutrition: 65, shelfDays: 3, fridgePreferred: true },
-    { id: "bread", name: "Хлеб", price: 70, satiety: 100, nutrition: 40, shelfDays: 5, fridgePreferred: false },
-    { id: "chicken", name: "Курица", price: 180, satiety: 180, nutrition: 90, shelfDays: 2, fridgePreferred: true },
+    { id: "apple", name: "Яблоко", price: 2, satiety: 45, nutrition: 45, shelfDays: 6, fridgePreferred: false },
+    { id: "milk", name: "Молоко", price: 3, satiety: 60, nutrition: 60, shelfDays: 3, fridgePreferred: true },
+    { id: "bread", name: "Хлеб", price: 2, satiety: 55, nutrition: 55, shelfDays: 5, fridgePreferred: false },
+    { id: "chicken", name: "Курица", price: 7, satiety: 120, nutrition: 85, shelfDays: 2, fridgePreferred: true },
   ],
   appliances: [
     { id: "fridge", name: "Холодильник", price: 2400, comfort: 70, powerPerHour: 0.05, durability: 1000 },
@@ -44,6 +44,7 @@ const LOCATIONS = [
   { id: "bank", icon: "🏦", label: "Банк" },
   { id: "jobs", icon: "📄", label: "Рынок труда" },
   { id: "clinic", icon: "🏥", label: "Медицина" },
+  { id: "settings", icon: "🛠️", label: "Настройки" },
   { id: "admin", icon: "⚙️", label: "Админ" },
 ];
 
@@ -56,10 +57,13 @@ let uiState = {
     windowY: 0,
     feedTop: 0,
   },
+  expandedJobCards: [],
 };
 
 function captureScrollState() {
   const feed = document.querySelector(".feed");
+  const openedJobs = Array.from(document.querySelectorAll("details[data-job-card][open]")).map((el) => el.dataset.jobCard);
+  uiState.expandedJobCards = openedJobs;
   uiState.scroll.windowY = window.scrollY || 0;
   uiState.scroll.feedTop = feed ? feed.scrollTop : 0;
 }
@@ -71,6 +75,12 @@ function restoreScrollState() {
   }
   if (typeof uiState.scroll.windowY === "number") {
     window.scrollTo({ top: uiState.scroll.windowY, behavior: "auto" });
+  }
+  if (uiState.expandedJobCards?.length) {
+    uiState.expandedJobCards.forEach((id) => {
+      const el = document.querySelector(`details[data-job-card="${id}"]`);
+      if (el) el.open = true;
+    });
   }
 }
 
@@ -347,7 +357,7 @@ function applyMinuteTick(profile) {
 
   profile.gameTime = gt.toISOString();
 
-  shiftStat(profile, "hunger", -0.38 * profile.speed);
+  shiftStat(profile, "hunger", -0.12 * profile.speed);
   shiftStat(profile, "energy", -0.27 * profile.speed);
   shiftStat(profile, "hygiene", -0.2 * profile.speed);
   shiftStat(profile, "stress", 0.12 * profile.speed);
@@ -469,6 +479,22 @@ function statLine(name, value) {
   return `<div class="stat"><div class="stat-head"><span>${name}</span><b>${value}</b></div><div class="bar"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div></div>`;
 }
 
+function infoTile(name, value, extra = "") {
+  return `<div class="stat info"><div class="stat-head"><span>${name}</span><b>${value}</b></div>${extra ? `<div class="sub">${extra}</div>` : ""}</div>`;
+}
+
+function dayProgressValue(isoTime) {
+  const d = new Date(isoTime);
+  const minutes = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return Math.round((minutes / (24 * 60)) * 1000);
+}
+
+function overallReputation(p) {
+  const reps = Object.values(p.career.rep || {});
+  if (!reps.length) return 0;
+  return Math.round(reps.reduce((a, b) => a + b, 0) / reps.length);
+}
+
 function daysToSalary(p) {
   const now = new Date(p.gameTime);
   const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0));
@@ -500,6 +526,8 @@ function cartTotal(p) {
 function gameMarkup(p) {
   const gt = new Date(p.gameTime);
   const loc = LOCATIONS.find((l) => l.id === p.location)?.label || p.location;
+  const dayProgress = dayProgressValue(p.gameTime);
+  const rep = overallReputation(p);
   return `
   <div class="game">
     <aside class="sidebar">
@@ -507,26 +535,6 @@ function gameMarkup(p) {
     </aside>
 
     <main class="main">
-      <section class="topbar" id="topbar">
-        <div class="meta compact-meta">
-          <span class="avatar">👤</span>
-          <span>Время: <b>${gt.toLocaleString("ru-RU")}</b></span>
-          <span>Локация: <b>${loc}</b></span>
-          <span>Баланс: <b>${fmtMoney(p.money)} €</b></span>
-        </div>
-        <div class="row">
-          <label>Скорость</label>
-          <select id="speedSelect">
-            <option value="1" ${p.speed === 1 ? "selected" : ""}>x1</option>
-            <option value="2" ${p.speed === 2 ? "selected" : ""}>x2</option>
-            <option value="5" ${p.speed === 5 ? "selected" : ""}>x5</option>
-            <option value="10" ${p.speed === 10 ? "selected" : ""}>x10</option>
-          </select>
-          <button data-action="exportProfile">Экспорт</button>
-          <button class="warn" data-action="logout">Выйти</button>
-        </div>
-      </section>
-
       <section class="stats" id="statsBar">
         <div class="stats-grid">
           ${statLine("Голод", p.stats.hunger)}
@@ -536,6 +544,9 @@ function gameMarkup(p) {
           ${statLine("Стресс", p.stats.stress)}
           ${statLine("Гигиена", p.stats.hygiene)}
           ${statLine("Комфорт", p.stats.comfort)}
+          ${infoTile("Баланс", `${fmtMoney(p.money)} €`)}
+          ${statLine("Время суток", dayProgress)}
+          ${statLine("Репутация", rep)}
         </div>
       </section>
 
@@ -668,8 +679,10 @@ function renderLocationActions(p) {
     return Object.entries(JOBS).map(([id, j]) => {
       const lvl = p.career.levels[id];
       const rep = p.career.rep[id];
-      const levelRows = Array.from({ length: 10 }).map((_, idx) => `<div class="mini-row">Уровень ${idx + 1}: ${fmtMoney(monthlySalaryForLevel(id, idx + 1))} €/мес</div>`).join("");
-      return `<details class="action-item"><summary><b>${j.name}</b> — текущий уровень ${lvl}, репутация ${rep}, базовый доход ${fmtMoney(monthlySalaryForLevel(id, lvl))} €/мес</summary><div style="color:var(--muted);font-size:13px;margin:6px 0">Тип: ${j.mode}${j.shift ? `, график: ${j.shift}` : ""}</div>${levelRows}<div class="row"><button data-job="${id}">Выбрать</button></div></details>`;
+      const playerRep = overallReputation(p);
+      const locked = playerRep < (j.unlockRep || 0);
+      const levelRows = Array.from({ length: 10 }).map((_, idx) => `<div class="salary-row"><span>Уровень ${idx + 1}</span><b>${fmtMoney(monthlySalaryForLevel(id, idx + 1))} €/мес</b></div>`).join("");
+      return `<details class="action-item job-card" data-job-card="${id}"><summary><b>${j.name}</b> — уровень ${lvl}, репутация ${rep}, доход ${fmtMoney(monthlySalaryForLevel(id, lvl))} €/мес ${locked ? `<span class="lock-badge">Требуется репутация ${j.unlockRep}</span>` : ""}</summary><div style="color:var(--muted);font-size:13px;margin:6px 0">Тип: ${j.mode}${j.shift ? `, график: ${j.shift}` : ""}</div><div class="salary-grid">${levelRows}</div><div class="row"><button ${locked ? "disabled" : ""} data-job="${id}">${locked ? "Недоступно" : "Выбрать"}</button></div></details>`;
     }).join("");
   }
 
@@ -678,6 +691,20 @@ function renderLocationActions(p) {
       actionBtn("Поликлиника (200 €)", "+здоровье, -стресс, медленно.", "clinic", 60),
       actionBtn("Больница (900 €)", "Сильное восстановление.", "hospital", 150),
     ].join("");
+  }
+
+  if (p.location === "settings") {
+    return `
+      <div class="utility-card"><b>Игровые настройки</b><div class="row"><label>Скорость</label>
+      <select id="speedSelect">
+        <option value="1" ${p.speed === 1 ? "selected" : ""}>x1</option>
+        <option value="2" ${p.speed === 2 ? "selected" : ""}>x2</option>
+        <option value="5" ${p.speed === 5 ? "selected" : ""}>x5</option>
+        <option value="10" ${p.speed === 10 ? "selected" : ""}>x10</option>
+      </select></div>
+      <div class="row"><button data-action="exportProfile">Экспорт профиля</button><button data-action="exportAll">Экспорт всех</button><button class="warn" data-action="logout">Выйти</button></div>
+      </div>
+    `;
   }
 
   if (p.location === "admin") {
@@ -1160,11 +1187,9 @@ function bindHandlers() {
   });
 
   window.onscroll = () => {
-    const topbar = document.getElementById("topbar");
     const stats = document.getElementById("statsBar");
-    if (!topbar || !stats) return;
+    if (!stats) return;
     const compact = window.scrollY > 20;
-    topbar.classList.toggle("compact", compact);
     stats.classList.toggle("compact", compact);
   };
 }
