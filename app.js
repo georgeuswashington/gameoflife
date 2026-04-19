@@ -58,9 +58,17 @@ let uiState = {
     feedTop: 0,
   },
   expandedJobCards: [],
+  forceTopOnRender: false,
 };
 
 function captureScrollState() {
+  if (uiState.forceTopOnRender) {
+    uiState.expandedJobCards = [];
+    uiState.scroll.windowY = 0;
+    uiState.scroll.feedTop = 0;
+    uiState.forceTopOnRender = false;
+    return;
+  }
   const feed = document.querySelector(".feed");
   const openedJobs = Array.from(document.querySelectorAll("details[data-job-card][open]")).map((el) => el.dataset.jobCard);
   uiState.expandedJobCards = openedJobs;
@@ -69,18 +77,18 @@ function captureScrollState() {
 }
 
 function restoreScrollState() {
-  const feed = document.querySelector(".feed");
-  if (feed) {
-    feed.scrollTop = uiState.scroll.feedTop || 0;
-  }
-  if (typeof uiState.scroll.windowY === "number") {
-    window.scrollTo({ top: uiState.scroll.windowY, behavior: "auto" });
-  }
   if (uiState.expandedJobCards?.length) {
     uiState.expandedJobCards.forEach((id) => {
       const el = document.querySelector(`details[data-job-card="${id}"]`);
       if (el) el.open = true;
     });
+  }
+  if (typeof uiState.scroll.windowY === "number") {
+    window.scrollTo({ top: uiState.scroll.windowY, behavior: "auto" });
+  }
+  const feed = document.querySelector(".feed");
+  if (feed) {
+    feed.scrollTop = uiState.scroll.feedTop || 0;
   }
 }
 
@@ -1110,6 +1118,7 @@ function bindHandlers() {
   app.querySelectorAll("[data-nav]").forEach((btn) => btn.onclick = () => {
     const p = getProfile();
     p.location = btn.dataset.nav;
+    uiState.forceTopOnRender = true;
     pushAction(p, `Переход в раздел: ${LOCATIONS.find((l) => l.id === p.location)?.label || p.location}.`);
     persistDB();
     render();
@@ -1128,6 +1137,7 @@ function bindHandlers() {
   app.querySelectorAll("[data-go]").forEach((btn) => btn.onclick = () => {
     const p = getProfile();
     p.location = btn.dataset.go;
+    uiState.forceTopOnRender = true;
     persistDB();
     render();
   });
@@ -1186,12 +1196,14 @@ function bindHandlers() {
     input.click();
   });
 
-  window.onscroll = () => {
+  const syncScrollDependentUI = () => {
     const stats = document.getElementById("statsBar");
     if (!stats) return;
     const compact = window.scrollY > 20;
     stats.classList.toggle("compact", compact);
   };
+  window.onscroll = syncScrollDependentUI;
+  syncScrollDependentUI();
 }
 
 function downloadJSON(name, obj) {
