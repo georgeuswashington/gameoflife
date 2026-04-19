@@ -1196,12 +1196,14 @@ function bindHandlers() {
     input.click();
   });
 
-  window.onscroll = () => {
+  const syncScrollDependentUI = () => {
     const stats = document.getElementById("statsBar");
     if (!stats) return;
     const compact = window.scrollY > 20;
     stats.classList.toggle("compact", compact);
   };
+  window.onscroll = syncScrollDependentUI;
+  syncScrollDependentUI();
 }
 
 function downloadJSON(name, obj) {
