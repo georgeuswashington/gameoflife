@@ -58,9 +58,17 @@ let uiState = {
     feedTop: 0,
   },
   expandedJobCards: [],
+  forceTopOnRender: false,
 };
 
 function captureScrollState() {
+  if (uiState.forceTopOnRender) {
+    uiState.expandedJobCards = [];
+    uiState.scroll.windowY = 0;
+    uiState.scroll.feedTop = 0;
+    uiState.forceTopOnRender = false;
+    return;
+  }
   const feed = document.querySelector(".feed");
   const openedJobs = Array.from(document.querySelectorAll("details[data-job-card][open]")).map((el) => el.dataset.jobCard);
   uiState.expandedJobCards = openedJobs;
@@ -1110,6 +1118,7 @@ function bindHandlers() {
   app.querySelectorAll("[data-nav]").forEach((btn) => btn.onclick = () => {
     const p = getProfile();
     p.location = btn.dataset.nav;
+    uiState.forceTopOnRender = true;
     pushAction(p, `Переход в раздел: ${LOCATIONS.find((l) => l.id === p.location)?.label || p.location}.`);
     persistDB();
     render();
@@ -1128,6 +1137,7 @@ function bindHandlers() {
   app.querySelectorAll("[data-go]").forEach((btn) => btn.onclick = () => {
     const p = getProfile();
     p.location = btn.dataset.go;
+    uiState.forceTopOnRender = true;
     persistDB();
     render();
   });
