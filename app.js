@@ -506,7 +506,8 @@ function statLine(name, value, options = {}) {
 }
 
 function infoTile(name, value, extra = "") {
-  return `<div class="stat info"><div class="stat-head"><span>${name}</span><b>${value}</b></div>${extra ? `<div class="sub">${extra}</div>` : ""}</div>`;
+  const label = name ? `<span>${name}</span>` : "";
+  return `<div class="stat info"><div class="stat-head">${label}<b>${value}</b></div>${extra ? `<div class="sub">${extra}</div>` : ""}</div>`;
 }
 
 function dayProgressValue(isoTime) {
@@ -590,6 +591,7 @@ function gameMarkup(p) {
   const loc = LOCATIONS.find((l) => l.id === p.location)?.label || p.location;
   const dayProgress = dayProgressValue(p.gameTime);
   const rep = overallReputation(p);
+  const statsCompact = (uiState.scroll.windowY || 0) > 20 ? "compact" : "";
   return `
   <div class="game">
     <aside class="sidebar">
@@ -597,7 +599,7 @@ function gameMarkup(p) {
     </aside>
 
     <main class="main">
-      <section class="stats" id="statsBar">
+      <section class="stats ${statsCompact}" id="statsBar">
         <div class="stats-grid">
           ${statLine("Голод", p.stats.hunger)}
           ${statLine("Энергия", p.stats.energy)}
@@ -607,7 +609,7 @@ function gameMarkup(p) {
           ${statLine("Гигиена", p.stats.hygiene)}
           ${statLine("Комфорт", p.stats.comfort)}
           ${infoTile("Баланс", `${fmtMoney(p.money)} €`)}
-          ${infoTile("Дата и время", fmtGameDateTime(p.gameTime))}
+          ${infoTile("", fmtGameDateTime(p.gameTime))}
           ${statLine("Суточный прогресс", dayProgress, { showValue: false })}
           ${statLine("Репутация", rep)}
         </div>
@@ -661,10 +663,11 @@ function renderItemModal(p) {
   return `<div class="modal-backdrop" data-closemodal="1"><div class="modal" onclick="event.stopPropagation()"><h3>${item.name}</h3>${body}<div class="row"><button data-closemodal="1">Закрыть</button></div></div></div>`;
 }
 
-function actionBtn(title, desc, key, minutes) {
+function actionBtn(title, desc, key, minutes, options = {}) {
+  const { disabled = false } = options;
   const urgent = String(desc).includes("[!]");
   const safeDesc = String(desc).replace("[!]", "");
-  return `<div class="action-item ${urgent ? "urgent-item" : ""}"><div><b>${title}</b><div style="color:var(--muted);font-size:13px">${safeDesc}</div><small>Время: ${minutes >= 60 ? `${Math.floor(minutes / 60)} ч ${minutes % 60} мин` : `${minutes} мин`}</small></div><button class="${urgent ? "urgent-btn" : ""}" data-do="${key}">Выполнить</button></div>`;
+  return `<div class="action-item ${urgent ? "urgent-item" : ""}"><div><b>${title}</b><div style="color:var(--muted);font-size:13px">${safeDesc}</div><small>Время: ${minutes >= 60 ? `${Math.floor(minutes / 60)} ч ${minutes % 60} мин` : `${minutes} мин`}</small></div><button class="${urgent ? "urgent-btn" : ""}" data-do="${key}" ${disabled ? "disabled" : ""}>Выполнить</button></div>`;
 }
 
 function renderLocationActions(p) {
@@ -679,7 +682,7 @@ function renderLocationActions(p) {
       actionBtn("Принять душ", `${showerHours > 30 ? "[!] " : ""}+гигиена, -стресс. Последний душ: ${showerHours} ч назад.`, "shower", 15),
       actionBtn("Почистить зубы", `${teethHours > 24 ? "[!] " : ""}+гигиена, +настроение. Последняя чистка: ${teethHours} ч назад.`, "teeth", 6),
       actionBtn("Поесть", "Съесть продукт из запасов.", "eat", 20),
-      actionBtn("Помыть посуду", `${dirty > 0 ? "[!] " : ""}Грязной посуды: ${dirty}. Небольшой рост комфорта.`, "dishes", 12),
+      actionBtn("Помыть посуду", `${dirty > 0 ? "[!] " : ""}Грязной посуды: ${dirty}. ${dirty > 0 ? "Небольшой рост комфорта." : "Сейчас мыть нечего."}`, "dishes", 12, { disabled: dirty <= 0 }),
       actionBtn("Тренировка", "+здоровье, -стресс, -энергия", "workout", 45),
       actionBtn("Прогулка", "+настроение, +здоровье", "walk", 40),
     ].join("");
@@ -951,6 +954,12 @@ function doAction(rawKey) {
       break;
     }
     case "dishes": {
+      if ((p.houseNeeds?.dirtyDishes || 0) <= 0) {
+        pushEvent(p, "Грязной посуды нет — мыть пока нечего.", "info", "home");
+        persistDB();
+        render();
+        return;
+      }
       advanceGameMinutes(p, 12, "Мытьё посуды");
       shiftStat(p, "comfort", 10);
       shiftStat(p, "hygiene", 20);
