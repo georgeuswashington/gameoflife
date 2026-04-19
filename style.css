@@ -103,7 +103,6 @@ small.note { color: var(--muted); }
   position: sticky;
   top: 0;
   z-index: 11;
-  transition: padding .15s ease;
 }
 .stats.compact {
   padding: 6px;
@@ -128,6 +127,11 @@ small.note { color: var(--muted); }
 }
 .stat { border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
 .stat-head { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }
+.stat-head b {
+  min-width: 56px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .bar { height: 10px; border-radius: 999px; overflow: hidden; background: #e8edf5; }
 .bar-fill { height: 100%; background: var(--ok); width: 50%; transition: width 0.75s ease, background-color 0.35s ease; }
 
@@ -216,19 +220,37 @@ small.note { color: var(--muted); }
 }
 
 .feed {
-  max-height: 70vh;
+  max-height: 56vh;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  padding: 8px;
 }
 .feed-item {
   border-bottom: 1px solid var(--line);
-  padding: 8px 0;
-  font-size: 14px;
+  padding: 6px 0;
+  font-size: 13px;
 }
 .feed-item.critical { background: #fff5f5; }
 .feed-item:last-child { border-bottom: 0; }
 .feed-item .t { color: var(--muted); font-size: 12px; }
+.feed-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.feed-go-icon {
+  font-size: 12px;
+  color: var(--accent);
+}
+.feed-item.clickable {
+  cursor: pointer;
+}
+.feed h3 {
+  margin: 2px 0 6px;
+  font-size: 15px;
+}
 
 .popup {
   position: fixed;
