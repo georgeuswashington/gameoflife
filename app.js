@@ -12,6 +12,9 @@ const JOBS = {
   courier: { name: "Курьер", mode: "flex", stressPerHour: 18, baseHourly: 11, unlockRep: 0 },
   callcenter: { name: "Оператор колл-центра", mode: "fixed", stressPerHour: 12, baseHourly: 10, shift: "09:00–18:00, 5/2", unlockRep: 450 },
   warehouse: { name: "Помощник на складе", mode: "shift", stressPerHour: 16, baseHourly: 12, shift: "2/2 по 12ч", unlockRep: 520 },
+  barista: { name: "Бариста", mode: "fixed", stressPerHour: 13, baseHourly: 11, shift: "08:00–17:00, 5/2", unlockRep: 420 },
+  sales: { name: "Продавец-консультант", mode: "shift", stressPerHour: 15, baseHourly: 13, shift: "2/2 по 10ч", unlockRep: 560 },
+  juniordev: { name: "Младший разработчик", mode: "fixed", stressPerHour: 20, baseHourly: 17, shift: "10:00–19:00, 5/2", unlockRep: 700 },
 };
 
 const SHOP_ITEMS = {
@@ -124,6 +127,10 @@ function persistDB() {
 function createProfile(name, difficulty = "normal") {
   const id = `p-${Date.now()}`;
   const now = new Date();
+  const jobIds = Object.keys(JOBS);
+  const levels = Object.fromEntries(jobIds.map((jobId) => [jobId, 1]));
+  const repByJob = Object.fromEntries(jobIds.map((jobId) => [jobId, jobId === "courier" ? 500 : 400]));
+  const workedMinutesByJob = Object.fromEntries(jobIds.map((jobId) => [jobId, 0]));
   db.profiles[id] = {
     id,
     name,
@@ -167,9 +174,9 @@ function createProfile(name, difficulty = "normal") {
     },
     career: {
       currentJobId: "courier",
-      levels: { courier: 1, callcenter: 1, warehouse: 1 },
-      rep: { courier: 500, callcenter: 400, warehouse: 400 },
-      workedMinutesByJob: { courier: 0, callcenter: 0, warehouse: 0 },
+      levels,
+      rep: repByJob,
+      workedMinutesByJob,
       workedMinutesInMonth: 0,
       accruedSalary: 0,
       lastSalaryMonthKey: monthKey(now),
@@ -222,7 +229,14 @@ function getProfile() {
   }
   p.meta = p.meta || {};
   p.career = p.career || {};
-  p.career.workedMinutesByJob = p.career.workedMinutesByJob || { courier: 0, callcenter: 0, warehouse: 0 };
+  p.career.levels = p.career.levels || {};
+  p.career.rep = p.career.rep || {};
+  p.career.workedMinutesByJob = p.career.workedMinutesByJob || {};
+  Object.keys(JOBS).forEach((jobId) => {
+    if (!Number.isFinite(p.career.levels[jobId])) p.career.levels[jobId] = 1;
+    if (!Number.isFinite(p.career.rep[jobId])) p.career.rep[jobId] = jobId === "courier" ? 500 : 400;
+    if (!Number.isFinite(p.career.workedMinutesByJob[jobId])) p.career.workedMinutesByJob[jobId] = 0;
+  });
   p.meta.lastTeethAt = p.meta.lastTeethAt || p.gameTime;
   p.meta.lastShowerAt = p.meta.lastShowerAt || p.gameTime;
   return p;
@@ -239,7 +253,7 @@ function dayKey(d) {
 }
 
 function clamp(v, min = 0, max = 1000) {
-  return Math.max(min, Math.min(max, Math.round(v)));
+  return Math.max(min, Math.min(max, v));
 }
 
 function fmtMoney(v) {
@@ -442,9 +456,9 @@ function maybeTriggerRandomEvent(profile) {
     shiftStat(profile, "stress", 60);
     pushEvent(profile, "Простуда: здоровье снижено. Можно обратиться в медицину.", "critical", "clinic");
   } else if (roll < 0.34) {
-    const bonus = 250 + Math.round(Math.random() * 250);
-    profile.money += bonus;
-    pushEvent(profile, `Премия на работе: +${fmtMoney(bonus)} €.`, "info", "work");
+    shiftStat(profile, "energy", -35);
+    shiftStat(profile, "stress", 45);
+    pushEvent(profile, "Тяжёлый день на работе: усталость и стресс выросли.", "info", "work");
   } else if (roll < 0.66) {
     shiftStat(profile, "mood", 90);
     shiftStat(profile, "stress", -65);
@@ -500,9 +514,10 @@ function authMarkup() {
 
 function statLine(name, value, options = {}) {
   const { showValue = true } = options;
-  const pct = Math.round((value / 1000) * 100);
+  const safeValue = Math.round(value);
+  const pct = Math.round((safeValue / 1000) * 100);
   const color = pct < 20 ? "var(--danger)" : pct < 45 ? "#d59012" : "var(--ok)";
-  return `<div class="stat"><div class="stat-head"><span>${name}</span>${showValue ? `<b>${value}</b>` : ""}</div><div class="bar"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div></div>`;
+  return `<div class="stat"><div class="stat-head"><span>${name}</span>${showValue ? `<b>${safeValue}</b>` : ""}</div><div class="bar"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div></div>`;
 }
 
 function infoTile(name, value, extra = "") {
@@ -521,6 +536,21 @@ function fmtGameDateTime(isoTime) {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function fmtGameDate(isoTime) {
+  return new Date(isoTime).toLocaleDateString("ru-RU", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+function fmtGameTime(isoTime) {
+  return new Date(isoTime).toLocaleTimeString("ru-RU", {
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -546,6 +576,12 @@ function hoursSince(gameTime, isoTime) {
 function monthlySalaryForLevel(jobId, level = 1) {
   const base = JOBS[jobId].baseHourly;
   return Math.round(base * 160 * (1 + level * 0.07));
+}
+
+function getJobLevelRepRequirement(jobId, level = 1) {
+  const job = JOBS[jobId];
+  const step = job.mode === "fixed" ? 70 : job.mode === "shift" ? 65 : 55;
+  return Math.min(1000, (job.unlockRep || 0) + (level - 1) * step);
 }
 
 function getPromotionThresholds(jobId, nextLevel) {
@@ -592,6 +628,13 @@ function gameMarkup(p) {
   const dayProgress = dayProgressValue(p.gameTime);
   const rep = overallReputation(p);
   const statsCompact = (uiState.scroll.windowY || 0) > 20 ? "compact" : "";
+  const dateTimeTile = `
+    <div class="stat info datetime-progress">
+      <div class="stat-head"><span>${fmtGameDate(p.gameTime)}</span><b>${fmtGameTime(p.gameTime)}</b></div>
+      <div class="bar"><div class="bar-fill" style="width:${Math.round((dayProgress / 1000) * 100)}%"></div></div>
+      <div class="sub">Суточный прогресс</div>
+    </div>
+  `;
   return `
   <div class="game">
     <aside class="sidebar">
@@ -609,8 +652,7 @@ function gameMarkup(p) {
           ${statLine("Гигиена", p.stats.hygiene)}
           ${statLine("Комфорт", p.stats.comfort)}
           ${infoTile("Баланс", `${fmtMoney(p.money)} €`)}
-          ${infoTile("", fmtGameDateTime(p.gameTime))}
-          ${statLine("Суточный прогресс", dayProgress, { showValue: false })}
+          ${dateTimeTile}
           ${statLine("Репутация", rep)}
         </div>
       </section>
@@ -622,7 +664,7 @@ function gameMarkup(p) {
           ${p.location === "home" ? renderHomeItems(p) : ""}
         </section>
 
-        <section class="feed">
+        <section class="feed compact-feed">
           <h3 style="margin-top:0">Игровые события</h3>
           ${p.logs.events.slice(0, 30).map((n) => `<div class="feed-item ${n.type} ${n.target ? "clickable" : ""}" ${n.target ? `data-go="${n.target}" title="Открыть раздел"` : ""}><div class="feed-item-row"><div>${n.text}</div>${n.target ? `<span class="feed-go-icon" aria-hidden="true">↗</span>` : ""}</div><div class="t">${new Date(n.ts).toLocaleString("ru-RU")}</div>${n.action ? `<button data-do="${n.action}">Выполнить</button>` : ""}</div>`).join("") || "<small class='note'>Пока пусто.</small>"}
 
@@ -701,20 +743,32 @@ function renderLocationActions(p) {
 
   if (p.location === "shops") {
     const owned = getOwnedItemIds(p);
-    const groceries = SHOP_ITEMS.groceries.map((g) => actionBtn(`Купить: ${g.name} (${g.price} €)`, `В корзине: ${getCartQuantity(p, "food", g.id)} шт. | Питательность ${g.nutrition}, срок ${g.shelfDays} дн.`, `cartAdd:food:${g.id}`, 2)).join("");
-    const appliances = SHOP_ITEMS.appliances.map((it) => actionBtn(`Техника: ${it.name} (${it.price} €)`, `${owned.has(it.id) ? "[Дома уже есть] " : ""}В корзине: ${getCartQuantity(p, "appliance", it.id)} шт. | Комфорт +${it.comfort || 0}`, `cartAdd:appliance:${it.id}`, 2)).join("");
-    const homeGoods = SHOP_ITEMS.home.map((it) => actionBtn(`Для дома: ${it.name} (${it.price} €)`, `${owned.has(it.id) ? "[Дома уже есть] " : ""}В корзине: ${getCartQuantity(p, "home", it.id)} шт. | Комфорт +${it.comfort || 0}`, `cartAdd:home:${it.id}`, 2)).join("");
-    const cartItems = p.shopCart.map((ci) => `<div class="mini-row"><b>${ci.name}</b> — ${ci.qty} шт. × ${ci.price} € = ${fmtMoney(ci.qty * ci.price)} € <button data-do="cartDec:${ci.type}:${ci.id}">-1</button></div>`).join("") || "<small>Корзина пуста.</small>";
-    return `<div class="utility-card"><b>Корзина</b><div>Товаров: ${p.shopCart.reduce((s, x) => s + x.qty, 0)} | Сумма: ${fmtMoney(cartTotal(p))} €</div>${cartItems}<div class="row"><button data-do="cartCheckout">Оформить покупку</button><button data-do="cartClear">Отменить всё</button></div></div><h4>Продукты</h4>${groceries}<h4>Бытовая техника</h4>${appliances}<h4>Всё для дома</h4>${homeGoods}`;
+    const renderShopRow = (type, item, extra, disabled = false) => {
+      const qty = getCartQuantity(p, type, item.id);
+      return `<div class="shop-row ${disabled ? "shop-row-disabled" : ""}">
+        <div><b>${item.name}</b><div class="shop-note">${extra}</div></div>
+        <div class="shop-qty">
+          <button data-do="cartDec:${type}:${item.id}" ${qty <= 0 ? "disabled" : ""}>−</button>
+          <b>${qty}</b>
+          <button data-do="cartAdd:${type}:${item.id}" ${disabled ? "disabled" : ""}>+</button>
+          <span>${fmtMoney(item.price * qty)} €</span>
+        </div>
+      </div>`;
+    };
+    const groceries = SHOP_ITEMS.groceries.map((g) => renderShopRow("food", g, `${g.price} € / шт • Питательность ${g.nutrition}, срок ${g.shelfDays} дн.`)).join("");
+    const appliances = SHOP_ITEMS.appliances.map((it) => renderShopRow("appliance", it, `${it.price} € • Комфорт +${it.comfort || 0}${owned.has(it.id) ? " • Уже установлен" : ""}`, owned.has(it.id))).join("");
+    const homeGoods = SHOP_ITEMS.home.map((it) => renderShopRow("home", it, `${it.price} € • Комфорт +${it.comfort || 0}${owned.has(it.id) ? " • Уже есть дома" : ""}`, owned.has(it.id))).join("");
+    return `<div class="utility-card shop-cart-summary"><b>Корзина</b><div>Товаров: ${p.shopCart.reduce((s, x) => s + x.qty, 0)} | Сумма: ${fmtMoney(cartTotal(p))} €</div><div class="row"><button data-do="cartCheckout">Оформить покупку</button><button data-do="cartClear">Отменить всё</button></div></div><h4>Продукты</h4>${groceries}<h4>Бытовая техника</h4>${appliances}<h4>Всё для дома</h4>${homeGoods}`;
   }
 
   if (p.location === "utilities") {
     const u = p.utilities;
     return `
     <div class="utility-card">
-      <div><b>Вода</b>: расход ${u.water.consumed.toFixed(1)} м³, долг ${fmtMoney(u.water.debt)} €, статус: ${u.water.active ? "активно" : "отключено"}, просрочка ${u.water.overdueDays} дн.</div>
-      <div><b>Электричество</b>: расход ${u.power.consumed.toFixed(1)} кВт·ч, долг ${fmtMoney(u.power.debt)} €, статус: ${u.power.active ? "активно" : "отключено"}, просрочка ${u.power.overdueDays} дн.</div>
+      <div><b>Вода</b>: расход ${u.water.consumed.toFixed(1)} м³, текущие начисления ${fmtMoney(u.water.consumed * u.water.tariff)} €, долг ${fmtMoney(u.water.debt)} €, статус: ${u.water.active ? "активно" : "отключено"}, просрочка ${u.water.overdueDays} дн.</div>
+      <div><b>Электричество</b>: расход ${u.power.consumed.toFixed(1)} кВт·ч, текущие начисления ${fmtMoney(u.power.consumed * u.power.tariff)} €, долг ${fmtMoney(u.power.debt)} €, статус: ${u.power.active ? "активно" : "отключено"}, просрочка ${u.power.overdueDays} дн.</div>
       <div><b>Аренда</b>: долг ${fmtMoney(u.rent.debt)} €, статус договора: ${u.rent.active ? "активно" : "остановлено"}, просрочка ${u.rent.overdueDays} дн.</div>
+      <small class="note">Вода и электричество начисляются в долг на начало следующего месяца.</small>
     </div>
     ${actionBtn("Оплатить воду", "Погашение полного долга по воде.", "payWater", 8)}
     ${actionBtn("Оплатить электричество", "Погашение полного долга по электроснабжению.", "payPower", 8)}
@@ -748,9 +802,10 @@ function renderLocationActions(p) {
       const lvl = p.career.levels[id];
       const rep = p.career.rep[id];
       const playerRep = overallReputation(p);
-      const locked = playerRep < (j.unlockRep || 0);
-      const levelRows = Array.from({ length: 10 }).map((_, idx) => `<div class="salary-row"><span>Уровень ${idx + 1}</span><b>${fmtMoney(monthlySalaryForLevel(id, idx + 1))} €/мес</b></div>`).join("");
-      return `<details class="action-item job-card" data-job-card="${id}"><summary><b>${j.name}</b> — уровень ${lvl}, репутация ${rep}, доход ${fmtMoney(monthlySalaryForLevel(id, lvl))} €/мес ${locked ? `<span class="lock-badge">Требуется репутация ${j.unlockRep}</span>` : ""}</summary><div style="color:var(--muted);font-size:13px;margin:6px 0">Тип: ${j.mode}${j.shift ? `, график: ${j.shift}` : ""}</div><div class="salary-grid">${levelRows}</div><div class="row"><button ${locked ? "disabled" : ""} data-job="${id}">${locked ? "Недоступно" : "Выбрать"}</button></div></details>`;
+      const neededRepForCurrentLevel = getJobLevelRepRequirement(id, lvl);
+      const locked = playerRep < neededRepForCurrentLevel;
+      const levelRows = Array.from({ length: 10 }).map((_, idx) => `<div class="salary-row"><span>Уровень ${idx + 1}</span><span>мин. репутация ${getJobLevelRepRequirement(id, idx + 1)}</span><b>${fmtMoney(monthlySalaryForLevel(id, idx + 1))} €/мес</b></div>`).join("");
+      return `<details class="action-item job-card" data-job-card="${id}"><summary><b>${j.name}</b> — уровень ${lvl}, репутация ${rep}, доход ${fmtMoney(monthlySalaryForLevel(id, lvl))} €/мес ${locked ? `<span class="lock-badge">Нужно ${neededRepForCurrentLevel} репутации</span>` : ""}</summary><div style="color:var(--muted);font-size:13px;margin:6px 0">Тип: ${j.mode}${j.shift ? `, график: ${j.shift}` : ""}</div><div class="salary-grid">${levelRows}</div><div class="row"><button ${locked ? "disabled" : ""} data-job="${id}">${locked ? "Недоступно" : "Выбрать"}</button></div></details>`;
     }).join("");
   }
 
@@ -1197,8 +1252,18 @@ function bindHandlers() {
 
   app.querySelectorAll("[data-job]").forEach((btn) => btn.onclick = () => {
     const p = getProfile();
-    p.career.currentJobId = btn.dataset.job;
-    pushEvent(p, `Выбрана работа: ${JOBS[btn.dataset.job].name}.`, "info", "work");
+    const targetJobId = btn.dataset.job;
+    const level = p.career.levels[targetJobId] || 1;
+    const needRep = getJobLevelRepRequirement(targetJobId, level);
+    const playerRep = overallReputation(p);
+    if (playerRep < needRep) {
+      pushEvent(p, `Недостаточно репутации для ${JOBS[targetJobId].name}: нужно ${needRep}, сейчас ${playerRep}.`, "critical", "jobs");
+      persistDB();
+      render();
+      return;
+    }
+    p.career.currentJobId = targetJobId;
+    pushEvent(p, `Выбрана работа: ${JOBS[targetJobId].name}.`, "info", "work");
     persistDB();
     render();
   });
