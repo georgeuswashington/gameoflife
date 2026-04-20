@@ -81,6 +81,13 @@ small.note { color: var(--muted); }
   min-height: 48px;
 }
 .sidebar button.active { background: #263b62; border-color: #3a5a92; }
+.sidebar-version {
+  color: #9fb1d6;
+  font-size: 11px;
+  text-align: center;
+  margin-top: -4px;
+  margin-bottom: 4px;
+}
 
 .main {
   display: grid;
