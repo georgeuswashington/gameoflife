@@ -1,7 +1,7 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.25";
+const GAME_VERSION = "v0.26";
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
@@ -20,15 +20,15 @@ const JOBS = {
 
 const SHOP_ITEMS = {
   groceries: [
-    { id: "apple", name: "Яблоко", price: 2, satiety: 45, nutrition: 45, shelfDays: 6, fridgePreferred: false },
-    { id: "milk", name: "Молоко", price: 3, satiety: 60, nutrition: 60, shelfDays: 3, fridgePreferred: true },
-    { id: "bread", name: "Хлеб", price: 2, satiety: 55, nutrition: 55, shelfDays: 5, fridgePreferred: false },
-    { id: "chicken", name: "Курица", price: 7, satiety: 120, nutrition: 85, shelfDays: 2, fridgePreferred: true },
-    { id: "egg", name: "Яйца", price: 4, satiety: 70, nutrition: 75, shelfDays: 8, fridgePreferred: true },
-    { id: "rice", name: "Рис", price: 3, satiety: 80, nutrition: 65, shelfDays: 12, fridgePreferred: false },
-    { id: "potato", name: "Картофель", price: 3, satiety: 75, nutrition: 60, shelfDays: 9, fridgePreferred: false },
-    { id: "tomato", name: "Помидоры", price: 3, satiety: 40, nutrition: 70, shelfDays: 5, fridgePreferred: true },
-    { id: "cheese", name: "Сыр", price: 5, satiety: 65, nutrition: 85, shelfDays: 6, fridgePreferred: true },
+    { id: "apple", name: "Яблоко", price: 2, satiety: 65, nutrition: 70, shelfDays: 6, fridgePreferred: false },
+    { id: "milk", name: "Молоко", price: 3, satiety: 110, nutrition: 115, shelfDays: 3, fridgePreferred: true },
+    { id: "bread", name: "Хлеб", price: 2, satiety: 140, nutrition: 120, shelfDays: 5, fridgePreferred: false },
+    { id: "chicken", name: "Курица", price: 7, satiety: 210, nutrition: 170, shelfDays: 2, fridgePreferred: true },
+    { id: "egg", name: "Яйца", price: 4, satiety: 160, nutrition: 150, shelfDays: 8, fridgePreferred: true },
+    { id: "rice", name: "Рис", price: 3, satiety: 190, nutrition: 140, shelfDays: 12, fridgePreferred: false },
+    { id: "potato", name: "Картофель", price: 3, satiety: 130, nutrition: 120, shelfDays: 9, fridgePreferred: false },
+    { id: "tomato", name: "Помидоры", price: 3, satiety: 45, nutrition: 80, shelfDays: 5, fridgePreferred: true },
+    { id: "cheese", name: "Сыр", price: 5, satiety: 210, nutrition: 190, shelfDays: 6, fridgePreferred: true },
   ],
   appliances: [
     { id: "fridge", name: "Холодильник", price: 2400, comfort: 70, powerPerHour: 0.05, durability: 1000 },
@@ -805,10 +805,12 @@ function renderItemModal(p) {
   }
   if (["microwave", "stove"].includes(item.id)) {
     const recipes = COOKING_RECIPES.filter((r) => r.appliances.includes(item.id));
-    body += `<h4>Приготовление еды</h4>${recipes.map((r) => {
+    const cookedMeals = p.food.stock.filter((f) => f.id.startsWith("meal-"));
+    body += `<h4>Приготовление еды</h4><div class="mini-row">Приготовленных блюд в запасе: <b>${cookedMeals.length}</b></div>${recipes.map((r) => {
       const cookStatus = getCookRecipeStatus(p, r.id, item.id);
       const buttonLabel = cookStatus.canCook ? "Приготовить" : "Недостаточно ингредиентов";
-      return `<div class="mini-row"><b>${r.name}</b> (${fmtDuration(r.minutes)})<div>Ингредиенты: ${r.ingredients.join(" + ")}</div><div>Питательность блюда: ${r.nutrition}</div><div class="row"><button data-do="cook:${item.id}:${r.id}" ${cookStatus.canCook ? "" : "disabled"}>${buttonLabel}</button></div></div>`;
+      const cookedByRecipe = cookedMeals.filter((f) => f.id.startsWith(`meal-${r.id}-`)).length;
+      return `<div class="mini-row"><b>${r.name}</b> (${fmtDuration(r.minutes)})<div>Ингредиенты: ${r.ingredients.join(" + ")}</div><div>Питательность блюда: ${r.nutrition}</div><div>Уже приготовлено: ${cookedByRecipe}</div><div class="row"><button data-do="cook:${item.id}:${r.id}" ${cookStatus.canCook ? "" : "disabled"}>${buttonLabel}</button></div></div>`;
     }).join("")}`;
   }
 
