@@ -218,6 +218,9 @@ function createProfile(name, difficulty = "normal") {
       lastEventMinuteTs: 0,
       lastTeethAt: now.toISOString(),
       lastShowerAt: now.toISOString(),
+      showerHistory: [],
+      teethBrushDayKey: dayKey(now),
+      teethBrushCount: 0,
     },
   };
   db.lastProfileId = id;
@@ -253,6 +256,9 @@ function getProfile() {
   });
   p.meta.lastTeethAt = p.meta.lastTeethAt || p.gameTime;
   p.meta.lastShowerAt = p.meta.lastShowerAt || p.gameTime;
+  p.meta.showerHistory = Array.isArray(p.meta.showerHistory) ? p.meta.showerHistory : [];
+  p.meta.teethBrushDayKey = p.meta.teethBrushDayKey || dayKey(p.gameTime);
+  p.meta.teethBrushCount = Number.isFinite(p.meta.teethBrushCount) ? p.meta.teethBrushCount : 0;
   if (!p.housing?.items?.some((i) => i.id === "table")) {
     p.housing.items = p.housing.items || [];
     p.housing.items.push({ id: "table", name: "Стол", wear: 930, comfort: 35 });
@@ -588,11 +594,12 @@ function fmtDuration(minutes) {
 
 function sleepEffects(minutes) {
   const factor = minutes / 120;
+  const fullNightFactor = minutes / 480;
   return {
-    energy: Math.round(95 * factor),
-    stress: Math.round(-35 * factor),
-    health: minutes >= 360 ? Math.round(40 * (minutes / 480)) : 0,
-    hunger: Math.round(-14 * factor),
+    energy: minutes >= 480 ? Math.round(760 * fullNightFactor) : Math.round(140 * factor),
+    stress: minutes >= 480 ? Math.round(-240 * fullNightFactor) : Math.round(-45 * factor),
+    health: minutes >= 360 ? Math.round(70 * (minutes / 480)) : 0,
+    hunger: Math.round(-18 * factor),
   };
 }
 
@@ -800,22 +807,24 @@ function renderLocationActions(p) {
   const job = JOBS[p.career.currentJobId];
   if (p.location === "home") {
     const teethHours = hoursSince(p.gameTime, p.meta.lastTeethAt);
+    const noEnergy = p.stats.energy <= 0;
     return [
       actionBtn("Почистить зубы", `${teethHours > 24 ? "[!] " : ""}+гигиена, +настроение. Последняя чистка: ${teethHours} ч назад.`, "teeth", 6),
       actionBtn("Поесть со стола", "Продукты размещаются на столе и управляются через предметы дома.", "eat", 20),
-      actionBtn("Тренировка", "+здоровье, -стресс, -энергия", "workout", 45),
-      actionBtn("Прогулка", "+настроение, +здоровье", "walk", 40),
+      actionBtn("Тренировка", noEnergy ? "Недоступно при нулевой энергии." : "+здоровье, -стресс, -энергия", "workout", 45, { disabled: noEnergy }),
+      actionBtn("Прогулка", noEnergy ? "Недоступно при нулевой энергии." : "+настроение, +здоровье", "walk", 40, { disabled: noEnergy }),
       `<small class="note">Сон, душ, мойка рук/посуды и готовка теперь запускаются через предметы в блоке «Дом и предметы».</small>`,
     ].join("");
   }
 
   if (p.location === "work") {
     const progress = promotionProgress(p, p.career.currentJobId);
+    const noEnergy = p.stats.energy <= 0;
     return [
       `<div class="job-status"><b>${job.name}</b><div>Накоплено к выплате: <b>${fmtMoney(p.career.accruedSalary)} €</b></div><div>До выплаты: <b>${daysToSalary(p)} дн.</b></div><div>Репутация: ${p.career.rep[p.career.currentJobId]} | Уровень: ${p.career.levels[p.career.currentJobId]}</div></div>`,
       `<div class="job-status"><b>Готовность к повышению (до уровня ${progress.nextLevel})</b><div style="margin-top:6px">Стаж на должности: ${Math.floor(progress.workedMinutes / 60)} ч / ${Math.floor(progress.minutesRequired / 60)} ч</div><div class="bar"><div class="bar-fill" style="width:${progress.timePct}%"></div></div><div style="margin-top:6px">Репутация: ${progress.rep} / ${progress.repRequired}</div><div class="bar"><div class="bar-fill" style="width:${progress.repPct}%"></div></div><small class="note">Повышение возможно при выполнении хотя бы одного условия.</small></div>`,
-      actionBtn("Работать 2 часа", "Опыт и накопление к месячной зарплате.", "work2", 2 * 60),
-      actionBtn("Работать 8 часов", "Основная смена.", "work8", 8 * 60),
+      actionBtn("Работать 2 часа", noEnergy ? "Недоступно при нулевой энергии." : "Опыт и накопление к месячной зарплате.", "work2", 2 * 60, { disabled: noEnergy }),
+      actionBtn("Работать 8 часов", noEnergy ? "Недоступно при нулевой энергии." : "Основная смена.", "work8", 8 * 60, { disabled: noEnergy }),
       actionBtn("Подать на повышение", "Требуется стаж на должности или достаточная репутация.", "promotion", 30),
     ].join("");
   }
@@ -1159,17 +1168,36 @@ function doAction(rawKey) {
       p.houseNeeds.dirtySince = null;
       break;
     case "shower":
+      p.meta.showerHistory = (p.meta.showerHistory || []).filter((ts) => (new Date(p.gameTime) - new Date(ts)) < (24 * 60 * 60 * 1000));
+      if (p.meta.showerHistory.length >= 3) {
+        pushEvent(p, "Слишком часто: душ можно принимать не более 3 раз за 24 часа.", "info", "home");
+        persistDB();
+        render();
+        return;
+      }
       advanceGameMinutes(p, 15, "Душ");
-      shiftStat(p, "hygiene", 160);
-      shiftStat(p, "stress", -40);
+      shiftStat(p, "hygiene", 320);
+      shiftStat(p, "stress", -55);
       p.meta.lastShowerAt = p.gameTime;
+      p.meta.showerHistory.push(p.gameTime);
       consumeUtilitiesForAction(p, { waterUse: 0.12, powerUse: 0.05 });
       break;
     case "teeth":
+      if (p.meta.teethBrushDayKey !== dayKey(p.gameTime)) {
+        p.meta.teethBrushDayKey = dayKey(p.gameTime);
+        p.meta.teethBrushCount = 0;
+      }
+      if (p.meta.teethBrushCount >= 4) {
+        pushEvent(p, "Лимит чистки зубов: не более 4 раз в сутки.", "info", "home");
+        persistDB();
+        render();
+        return;
+      }
       advanceGameMinutes(p, 6, "Чистка зубов");
-      shiftStat(p, "hygiene", 80);
-      shiftStat(p, "mood", 20);
+      shiftStat(p, "hygiene", 190);
+      shiftStat(p, "mood", 30);
       p.meta.lastTeethAt = p.gameTime;
+      p.meta.teethBrushCount += 1;
       consumeUtilitiesForAction(p, { waterUse: 0.02 });
       break;
     case "eat": {
@@ -1200,6 +1228,7 @@ function doAction(rawKey) {
       break;
     }
     case "workout":
+      if (p.stats.energy <= 0) return pushEvent(p, "Нельзя тренироваться при нулевой энергии.", "info", "home");
       advanceGameMinutes(p, 45, "Тренировка дома");
       shiftStat(p, "health", 35);
       shiftStat(p, "stress", -35);
@@ -1207,6 +1236,7 @@ function doAction(rawKey) {
       shiftStat(p, "hunger", -60);
       break;
     case "walk":
+      if (p.stats.energy <= 0) return pushEvent(p, "Нельзя идти на прогулку при нулевой энергии.", "info", "home");
       advanceGameMinutes(p, 40, "Прогулка");
       shiftStat(p, "mood", 45);
       shiftStat(p, "health", 20);
@@ -1364,6 +1394,10 @@ function labelUtility(k) {
 
 function doWorkHours(hours) {
   const p = getProfile();
+  if (p.stats.energy <= 0) {
+    pushEvent(p, "Нельзя работать при нулевой энергии. Сначала восстановитесь.", "info", "home");
+    return;
+  }
   const jobId = p.career.currentJobId;
   const job = JOBS[jobId];
 
@@ -1376,7 +1410,7 @@ function doWorkHours(hours) {
   p.career.workedMinutesByJob[jobId] += hours * 60;
   p.career.rep[jobId] = clamp(p.career.rep[jobId] + Math.round(12 * efficiency - 2));
   shiftStat(p, "stress", job.stressPerHour * hours);
-  shiftStat(p, "energy", -25 * hours);
+  shiftStat(p, "energy", -12 * hours);
   shiftStat(p, "hunger", -20 * hours);
 
   if (Math.random() < 0.03 && job.mode === "fixed") {
