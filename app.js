@@ -1,7 +1,7 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.21";
+const GAME_VERSION = "v0.22";
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
