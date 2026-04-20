@@ -1,7 +1,7 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.24";
+const GAME_VERSION = "v0.25";
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
@@ -605,11 +605,24 @@ function sleepEffects(minutes) {
 }
 
 function canCookRecipe(profile, recipeId, applianceId) {
+  const status = getCookRecipeStatus(profile, recipeId, applianceId);
+  return status.canCook;
+}
+
+function getCookRecipeStatus(profile, recipeId, applianceId) {
   const recipe = COOKING_RECIPES.find((r) => r.id === recipeId);
-  if (!recipe || !recipe.appliances.includes(applianceId)) return false;
+  if (!recipe || !recipe.appliances.includes(applianceId)) {
+    return { canCook: false, missingIngredients: [] };
+  }
   const counts = {};
-  profile.food.stock.forEach((f) => { counts[f.id.split("-")[0]] = (counts[f.id.split("-")[0]] || 0) + 1; });
-  return recipe.ingredients.every((id) => (counts[id] || 0) > 0);
+  profile.food.stock
+    .filter((f) => f.storage === "table" || f.storage === "pantry")
+    .forEach((f) => { counts[f.id.split("-")[0]] = (counts[f.id.split("-")[0]] || 0) + 1; });
+  const missingIngredients = recipe.ingredients.filter((id) => (counts[id] || 0) <= 0);
+  return {
+    canCook: missingIngredients.length === 0,
+    missingIngredients,
+  };
 }
 
 function overallReputation(p) {
@@ -793,8 +806,9 @@ function renderItemModal(p) {
   if (["microwave", "stove"].includes(item.id)) {
     const recipes = COOKING_RECIPES.filter((r) => r.appliances.includes(item.id));
     body += `<h4>Приготовление еды</h4>${recipes.map((r) => {
-      const canCook = canCookRecipe(p, r.id, item.id);
-      return `<div class="mini-row"><b>${r.name}</b> (${fmtDuration(r.minutes)})<div>Ингредиенты: ${r.ingredients.join(" + ")}</div><div>Питательность блюда: ${r.nutrition}</div><div class="row"><button data-do="cook:${item.id}:${r.id}" ${canCook ? "" : "disabled"}>Приготовить</button></div></div>`;
+      const cookStatus = getCookRecipeStatus(p, r.id, item.id);
+      const buttonLabel = cookStatus.canCook ? "Приготовить" : "Недостаточно ингредиентов";
+      return `<div class="mini-row"><b>${r.name}</b> (${fmtDuration(r.minutes)})<div>Ингредиенты: ${r.ingredients.join(" + ")}</div><div>Питательность блюда: ${r.nutrition}</div><div class="row"><button data-do="cook:${item.id}:${r.id}" ${cookStatus.canCook ? "" : "disabled"}>${buttonLabel}</button></div></div>`;
     }).join("")}`;
   }
 
@@ -1055,10 +1069,14 @@ function doAction(rawKey) {
     const [, applianceId, recipeId] = rawKey.split(":");
     const recipe = COOKING_RECIPES.find((r) => r.id === recipeId);
     if (!recipe || !recipe.appliances.includes(applianceId)) return;
+    const cookStatus = getCookRecipeStatus(p, recipeId, applianceId);
+    if (!cookStatus.canCook) return pushEvent(p, `Не хватает ингредиентов для блюда «${recipe.name}» на столе.`, "info", "home");
     const usedIndexes = [];
     for (const ingredientId of recipe.ingredients) {
-      const idx = p.food.stock.findIndex((f, i) => !usedIndexes.includes(i) && f.id.startsWith(`${ingredientId}-`));
-      if (idx < 0) return pushEvent(p, `Не хватает ингредиентов для блюда «${recipe.name}».`, "info", "home");
+      const idx = p.food.stock.findIndex((f, i) => (f.storage === "table" || f.storage === "pantry")
+        && !usedIndexes.includes(i)
+        && f.id.startsWith(`${ingredientId}-`));
+      if (idx < 0) return pushEvent(p, `Не хватает ингредиентов для блюда «${recipe.name}» на столе.`, "info", "home");
       usedIndexes.push(idx);
     }
     p.food.stock = p.food.stock.filter((_, i) => !usedIndexes.includes(i));
