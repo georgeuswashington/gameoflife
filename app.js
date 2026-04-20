@@ -1,7 +1,7 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.26";
+const GAME_VERSION = "v0.27";
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
@@ -282,8 +282,23 @@ function clamp(v, min = 0, max = 1000) {
   return Math.max(min, Math.min(max, v));
 }
 
+function fmtNumber(v, maximumFractionDigits = 2) {
+  const formatted = Number(v).toLocaleString("ru-RU", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  });
+  return formatted.replace(/[\u00A0\u202F]/g, " ");
+}
+
 function fmtMoney(v) {
-  return Number(v).toLocaleString("ru-RU");
+  return fmtNumber(v, 2);
+}
+
+function parseLocaleNumber(raw, fallback = 0) {
+  if (raw === null || raw === undefined) return fallback;
+  const normalized = String(raw).trim().replace(/\s+/g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function shiftStat(p, key, delta) {
@@ -771,12 +786,12 @@ function renderItemModal(p) {
   let body = `<p>Состояние предмета: <b>${item.wear}/1000</b></p>`;
   if (item.id === "fridge") {
     const food = p.food.stock.filter((f) => f.storage === "fridge");
-    body += `<h4>Продукты в холодильнике</h4>${food.length ? food.map((f) => `<div class='mini-row'>${f.name} — срок ${Math.max(0, f.daysLeft).toFixed(1)} дн., питательность ${f.nutrition}<div class="row"><button data-do="moveToTable:${f.id}">На стол</button></div></div>`).join("") : "<small>Пусто.</small>"}`;
+    body += `<h4>Продукты в холодильнике</h4>${food.length ? food.map((f) => `<div class='mini-row'>${f.name} — срок ${fmtNumber(Math.max(0, f.daysLeft), 1)} дн., питательность ${f.nutrition}<div class="row"><button data-do="moveToTable:${f.id}">На стол</button></div></div>`).join("") : "<small>Пусто.</small>"}`;
   }
   if (item.id === "table") {
     const tableFood = p.food.stock.filter((f) => f.storage === "table" || f.storage === "pantry");
     const hasFridge = p.housing.items.some((i) => i.id === "fridge");
-    body += `<h4>Продукты на столе</h4>${tableFood.length ? tableFood.map((f) => `<div class='mini-row'>${f.name} — срок ${Math.max(0, f.daysLeft).toFixed(1)} дн., питательность ${f.nutrition}<div class="row"><button data-do="eatFood:${f.id}">Съесть</button>${hasFridge ? `<button data-do="moveToFridge:${f.id}">В холодильник</button>` : ""}</div></div>`).join("") : "<small>На столе пусто.</small>"}`;
+    body += `<h4>Продукты на столе</h4>${tableFood.length ? tableFood.map((f) => `<div class='mini-row'>${f.name} — срок ${fmtNumber(Math.max(0, f.daysLeft), 1)} дн., питательность ${f.nutrition}<div class="row"><button data-do="eatFood:${f.id}">Съесть</button>${hasFridge ? `<button data-do="moveToFridge:${f.id}">В холодильник</button>` : ""}</div></div>`).join("") : "<small>На столе пусто.</small>"}`;
     if (!hasFridge) body += `<small class="note">Чтобы убирать продукты в холод, купите холодильник.</small>`;
   }
   if (item.id === "sink") {
@@ -874,8 +889,8 @@ function renderLocationActions(p) {
     const u = p.utilities;
     return `
     <div class="utility-card">
-      <div><b>Вода</b>: расход ${u.water.consumed.toFixed(1)} м³, текущие начисления ${fmtMoney(u.water.consumed * u.water.tariff)} €, долг ${fmtMoney(u.water.debt)} €, статус: ${u.water.active ? "активно" : "отключено"}, просрочка ${u.water.overdueDays} дн.</div>
-      <div><b>Электричество</b>: расход ${u.power.consumed.toFixed(1)} кВт·ч, текущие начисления ${fmtMoney(u.power.consumed * u.power.tariff)} €, долг ${fmtMoney(u.power.debt)} €, статус: ${u.power.active ? "активно" : "отключено"}, просрочка ${u.power.overdueDays} дн.</div>
+      <div><b>Вода</b>: расход ${fmtNumber(u.water.consumed, 1)} м³, текущие начисления ${fmtMoney(u.water.consumed * u.water.tariff)} €, долг ${fmtMoney(u.water.debt)} €, статус: ${u.water.active ? "активно" : "отключено"}, просрочка ${u.water.overdueDays} дн.</div>
+      <div><b>Электричество</b>: расход ${fmtNumber(u.power.consumed, 1)} кВт·ч, текущие начисления ${fmtMoney(u.power.consumed * u.power.tariff)} €, долг ${fmtMoney(u.power.debt)} €, статус: ${u.power.active ? "активно" : "отключено"}, просрочка ${u.power.overdueDays} дн.</div>
       <div><b>Аренда</b>: долг ${fmtMoney(u.rent.debt)} €, статус договора: ${u.rent.active ? "активно" : "остановлено"}, просрочка ${u.rent.overdueDays} дн.</div>
       <small class="note">Вода и электричество начисляются в долг на начало следующего месяца.</small>
     </div>
@@ -889,7 +904,7 @@ function renderLocationActions(p) {
     const dep = p.bank.deposit;
     const credit = p.bank.credit;
     const depositSummary = dep
-      ? `<div class="utility-card"><b>Активный вклад</b><div>Сумма: ${fmtMoney(dep.balance)} € (внесено ${fmtMoney(dep.principal)} €)</div><div>Ставка: ${(dep.rateAnnual * 100).toFixed(1)}% годовых, срок: ${dep.termMonths} мес.</div><div>Окончание: ${new Date(dep.endAt).toLocaleDateString("ru-RU")}</div><div>Ожидаемая выгода к концу срока: ${fmtMoney(Math.max(0, Math.round(dep.principal * ((1 + dep.rateAnnual / 12) ** dep.termMonths - 1))))} €</div></div>`
+      ? `<div class="utility-card"><b>Активный вклад</b><div>Сумма: ${fmtMoney(dep.balance)} € (внесено ${fmtMoney(dep.principal)} €)</div><div>Ставка: ${fmtNumber(dep.rateAnnual * 100, 1)}% годовых, срок: ${dep.termMonths} мес.</div><div>Окончание: ${new Date(dep.endAt).toLocaleDateString("ru-RU")}</div><div>Ожидаемая выгода к концу срока: ${fmtMoney(Math.max(0, Math.round(dep.principal * ((1 + dep.rateAnnual / 12) ** dep.termMonths - 1))))} €</div></div>`
       : `<div class="utility-card"><b>Вклад не открыт</b></div>`;
     const creditSummary = credit?.balance > 0
       ? `<div class="utility-card"><b>Кредит</b><div>Тело кредита: ${fmtMoney(credit.principal)} €</div><div>Текущий долг: ${fmtMoney(credit.balance)} €</div><div>Переплата: ${fmtMoney(Math.max(0, credit.balance - credit.principal))} €</div></div>`
@@ -942,10 +957,10 @@ function renderLocationActions(p) {
   if (p.location === "admin") {
     return `
       <div class="admin-box">
-        <label>Инфляция в месяц: <input id="adminInfl" type="number" step="0.001" value="${p.admin.inflationMonthly}" /></label>
+        <label>Инфляция в месяц: <input id="adminInfl" type="text" inputmode="decimal" value="${fmtNumber(p.admin.inflationMonthly, 3)}" /></label>
         <label>Событий/день минимум: <input id="adminEvtMin" type="number" step="1" value="${p.admin.randomEventsPerDayMin}" /></label>
         <label>Событий/день максимум: <input id="adminEvtMax" type="number" step="1" value="${p.admin.randomEventsPerDayMax}" /></label>
-        <label>Ключевая ставка ЦБ (%): <input id="adminRate" type="number" step="0.1" value="${p.admin.keyRate}" /></label>
+        <label>Ключевая ставка ЦБ (%): <input id="adminRate" type="text" inputmode="decimal" value="${fmtNumber(p.admin.keyRate, 1)}" /></label>
       </div>
       ${actionBtn("Сохранить админ-настройки", "Применить параметры баланса.", "adminSave", 0)}
       ${actionBtn("Сброс админ-настроек", "Сброс к значениям по умолчанию.", "adminReset", 0)}
@@ -1375,10 +1390,10 @@ function doAction(rawKey) {
       advanceGameMinutes(p, 12, "Оплата всех ЖКУ");
       break;
     case "adminSave": {
-      p.admin.inflationMonthly = Number(document.getElementById("adminInfl")?.value || p.admin.inflationMonthly);
+      p.admin.inflationMonthly = parseLocaleNumber(document.getElementById("adminInfl")?.value, p.admin.inflationMonthly);
       p.admin.randomEventsPerDayMin = Number(document.getElementById("adminEvtMin")?.value || p.admin.randomEventsPerDayMin);
       p.admin.randomEventsPerDayMax = Number(document.getElementById("adminEvtMax")?.value || p.admin.randomEventsPerDayMax);
-      p.admin.keyRate = Number(document.getElementById("adminRate")?.value || p.admin.keyRate);
+      p.admin.keyRate = parseLocaleNumber(document.getElementById("adminRate")?.value, p.admin.keyRate);
       pushEvent(p, "Админ-параметры сохранены.", "info", "admin");
       break;
     }
