@@ -23,6 +23,11 @@ const SHOP_ITEMS = {
     { id: "milk", name: "Молоко", price: 3, satiety: 60, nutrition: 60, shelfDays: 3, fridgePreferred: true },
     { id: "bread", name: "Хлеб", price: 2, satiety: 55, nutrition: 55, shelfDays: 5, fridgePreferred: false },
     { id: "chicken", name: "Курица", price: 7, satiety: 120, nutrition: 85, shelfDays: 2, fridgePreferred: true },
+    { id: "egg", name: "Яйца", price: 4, satiety: 70, nutrition: 75, shelfDays: 8, fridgePreferred: true },
+    { id: "rice", name: "Рис", price: 3, satiety: 80, nutrition: 65, shelfDays: 12, fridgePreferred: false },
+    { id: "potato", name: "Картофель", price: 3, satiety: 75, nutrition: 60, shelfDays: 9, fridgePreferred: false },
+    { id: "tomato", name: "Помидоры", price: 3, satiety: 40, nutrition: 70, shelfDays: 5, fridgePreferred: true },
+    { id: "cheese", name: "Сыр", price: 5, satiety: 65, nutrition: 85, shelfDays: 6, fridgePreferred: true },
   ],
   appliances: [
     { id: "fridge", name: "Холодильник", price: 2400, comfort: 70, powerPerHour: 0.05, durability: 1000 },
@@ -31,6 +36,7 @@ const SHOP_ITEMS = {
     { id: "coffee", name: "Кофе-машина", price: 1400, comfort: 25, moodBoost: 30, powerPerHour: 0.03, durability: 1000 },
     { id: "kettle", name: "Электрочайник", price: 800, comfort: 15, powerPerHour: 0.02, durability: 1000 },
     { id: "microwave", name: "Микроволновка", price: 1900, comfort: 22, powerPerHour: 0.05, durability: 1000 },
+    { id: "stove", name: "Варочная поверхность", price: 2600, comfort: 28, powerPerHour: 0.06, durability: 1000 },
     { id: "vacuum", name: "Робот-пылесос", price: 3600, comfort: 58, powerPerHour: 0.04, durability: 1000 },
     { id: "airpurifier", name: "Очиститель воздуха", price: 2700, comfort: 35, powerPerHour: 0.03, durability: 1000 },
   ],
@@ -45,6 +51,13 @@ const SHOP_ITEMS = {
     { id: "dresser", name: "Комод", price: 1250, comfort: 30, durability: 1000 },
   ],
 };
+
+const COOKING_RECIPES = [
+  { id: "omelette", name: "Омлет", ingredients: ["egg", "milk"], satiety: 180, nutrition: 160, minutes: 14, appliances: ["microwave", "stove"] },
+  { id: "chickenRice", name: "Курица с рисом", ingredients: ["chicken", "rice"], satiety: 220, nutrition: 190, minutes: 24, appliances: ["stove"] },
+  { id: "bakedPotato", name: "Запечённый картофель", ingredients: ["potato", "cheese"], satiety: 170, nutrition: 150, minutes: 18, appliances: ["microwave", "stove"] },
+  { id: "vegSalad", name: "Овощной салат", ingredients: ["tomato", "cheese"], satiety: 130, nutrition: 170, minutes: 10, appliances: ["stove"] },
+];
 
 const LOCATIONS = [
   { id: "home", icon: "🏠", label: "Дом" },
@@ -167,6 +180,7 @@ function createProfile(name, difficulty = "normal") {
     housing: {
       items: [
         { id: "mattress", name: "Матрас", wear: 900, comfort: 20 },
+        { id: "table", name: "Стол", wear: 930, comfort: 35 },
         { id: "lightbulb", name: "Лампочка", wear: 940, comfort: 5, powerPerHour: 0.01 },
         { id: "sink", name: "Раковина", wear: 920, comfort: 10 },
         { id: "shower", name: "Душевая кабина", wear: 900, comfort: 15, waterPerUse: 30 },
@@ -239,6 +253,11 @@ function getProfile() {
   });
   p.meta.lastTeethAt = p.meta.lastTeethAt || p.gameTime;
   p.meta.lastShowerAt = p.meta.lastShowerAt || p.gameTime;
+  if (!p.housing?.items?.some((i) => i.id === "table")) {
+    p.housing.items = p.housing.items || [];
+    p.housing.items.push({ id: "table", name: "Стол", wear: 930, comfort: 35 });
+    shiftStat(p, "comfort", 35);
+  }
   return p;
 }
 
@@ -337,6 +356,8 @@ function processFoodSpoilage(profile) {
     if (f.storage === "fridge" && f.fridgePreferred) loss = 0.35;
     if (f.storage === "fridge" && !f.fridgePreferred) loss = 0.7;
     if (f.storage === "pantry" && f.fridgePreferred) loss = 1.5;
+    if (f.storage === "table" && f.fridgePreferred) loss = 1.7;
+    if (f.storage === "table" && !f.fridgePreferred) loss = 1.15;
     f.daysLeft -= loss;
     if (f.daysLeft <= 0) {
       pushEvent(profile, `Продукт испортился: ${f.name}.`, "critical", "home");
@@ -556,6 +577,33 @@ function fmtGameTime(isoTime) {
   });
 }
 
+function fmtDuration(minutes) {
+  if (minutes >= 60) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m ? `${h} ч ${m} мин` : `${h} ч`;
+  }
+  return `${minutes} мин`;
+}
+
+function sleepEffects(minutes) {
+  const factor = minutes / 120;
+  return {
+    energy: Math.round(95 * factor),
+    stress: Math.round(-35 * factor),
+    health: minutes >= 360 ? Math.round(40 * (minutes / 480)) : 0,
+    hunger: Math.round(-14 * factor),
+  };
+}
+
+function canCookRecipe(profile, recipeId, applianceId) {
+  const recipe = COOKING_RECIPES.find((r) => r.id === recipeId);
+  if (!recipe || !recipe.appliances.includes(applianceId)) return false;
+  const counts = {};
+  profile.food.stock.forEach((f) => { counts[f.id.split("-")[0]] = (counts[f.id.split("-")[0]] || 0) + 1; });
+  return recipe.ingredients.every((id) => (counts[id] || 0) > 0);
+}
+
 function overallReputation(p) {
   const reps = Object.values(p.career.rep || {});
   if (!reps.length) return 0;
@@ -698,7 +746,44 @@ function renderItemModal(p) {
   let body = `<p>Состояние предмета: <b>${item.wear}/1000</b></p>`;
   if (item.id === "fridge") {
     const food = p.food.stock.filter((f) => f.storage === "fridge");
-    body += `<h4>Продукты в холодильнике</h4>${food.length ? food.map((f) => `<div class='mini-row'>${f.name} — срок ${Math.max(0, f.daysLeft).toFixed(1)} дн., цена ${f.price} €, питательность ${f.nutrition}</div>`).join("") : "<small>Пусто.</small>"}`;
+    body += `<h4>Продукты в холодильнике</h4>${food.length ? food.map((f) => `<div class='mini-row'>${f.name} — срок ${Math.max(0, f.daysLeft).toFixed(1)} дн., питательность ${f.nutrition}<div class="row"><button data-do="moveToTable:${f.id}">На стол</button></div></div>`).join("") : "<small>Пусто.</small>"}`;
+  }
+  if (item.id === "table") {
+    const tableFood = p.food.stock.filter((f) => f.storage === "table" || f.storage === "pantry");
+    const hasFridge = p.housing.items.some((i) => i.id === "fridge");
+    body += `<h4>Продукты на столе</h4>${tableFood.length ? tableFood.map((f) => `<div class='mini-row'>${f.name} — срок ${Math.max(0, f.daysLeft).toFixed(1)} дн., питательность ${f.nutrition}<div class="row"><button data-do="eatFood:${f.id}">Съесть</button>${hasFridge ? `<button data-do="moveToFridge:${f.id}">В холодильник</button>` : ""}</div></div>`).join("") : "<small>На столе пусто.</small>"}`;
+    if (!hasFridge) body += `<small class="note">Чтобы убирать продукты в холод, купите холодильник.</small>`;
+  }
+  if (item.id === "sink") {
+    const dirty = p.houseNeeds?.dirtyDishes || 0;
+    body += `<h4>Действия у раковины</h4>
+      ${actionBtn("Помыть руки", "+гигиена, небольшой комфорт.", "washHands", 2)}
+      ${actionBtn("Помыть посуду", `Грязной посуды: ${dirty}.`, "sinkDishes", 12, { disabled: dirty <= 0 })}`;
+  }
+  if (item.id === "dishwasher") {
+    const dirty = p.houseNeeds?.dirtyDishes || 0;
+    body += `<h4>Посудомоечная машина</h4>
+      <div class="mini-row">Грязной посуды: <b>${dirty}</b></div>
+      ${actionBtn("Сложить посуду и запустить", "Экономит воду и время.", "dishwasherRun", 9, { disabled: dirty <= 0 })}`;
+  }
+  if (item.id === "shower") {
+    const showerHours = hoursSince(p.gameTime, p.meta.lastShowerAt);
+    body += `<h4>Гигиена</h4>${actionBtn("Принять душ", `Последний душ: ${showerHours} ч назад.`, "shower", 15)}`;
+  }
+  if (["mattress", "bed", "sofa"].includes(item.id)) {
+    const fx8 = sleepEffects(8 * 60);
+    const fx2 = sleepEffects(2 * 60);
+    body += `<h4>Сон</h4>
+      ${actionBtn("Сон", `Восстановление: +${fx8.energy} энергии, ${fx8.stress} стресса, голод ${fx8.hunger}.`, "sleep:480", 8 * 60)}
+      ${actionBtn("Сон", `Восстановление: +${fx2.energy} энергии, ${fx2.stress} стресса, голод ${fx2.hunger}.`, "sleep:120", 2 * 60)}
+      <div class="row"><button data-do="sleepCustom">Выбрать длительность...</button></div>`;
+  }
+  if (["microwave", "stove"].includes(item.id)) {
+    const recipes = COOKING_RECIPES.filter((r) => r.appliances.includes(item.id));
+    body += `<h4>Приготовление еды</h4>${recipes.map((r) => {
+      const canCook = canCookRecipe(p, r.id, item.id);
+      return `<div class="mini-row"><b>${r.name}</b> (${fmtDuration(r.minutes)})<div>Ингредиенты: ${r.ingredients.join(" + ")}</div><div>Питательность блюда: ${r.nutrition}</div><div class="row"><button data-do="cook:${item.id}:${r.id}" ${canCook ? "" : "disabled"}>Приготовить</button></div></div>`;
+    }).join("")}`;
   }
 
   return `<div class="modal-backdrop" data-closemodal="1"><div class="modal" onclick="event.stopPropagation()"><h3>${item.name}</h3>${body}<div class="row"><button data-closemodal="1">Закрыть</button></div></div></div>`;
@@ -708,24 +793,19 @@ function actionBtn(title, desc, key, minutes, options = {}) {
   const { disabled = false } = options;
   const urgent = String(desc).includes("[!]");
   const safeDesc = String(desc).replace("[!]", "");
-  return `<div class="action-item ${urgent ? "urgent-item" : ""}"><div><b>${title}</b><div style="color:var(--muted);font-size:13px">${safeDesc}</div><small>Время: ${minutes >= 60 ? `${Math.floor(minutes / 60)} ч ${minutes % 60} мин` : `${minutes} мин`}</small></div><button class="${urgent ? "urgent-btn" : ""}" data-do="${key}" ${disabled ? "disabled" : ""}>Выполнить</button></div>`;
+  return `<div class="action-item ${urgent ? "urgent-item" : ""}"><div><b>${title}${minutes > 0 ? ` (${fmtDuration(minutes)})` : ""}</b><div style="color:var(--muted);font-size:13px">${safeDesc}</div></div><button class="${urgent ? "urgent-btn" : ""}" data-do="${key}" ${disabled ? "disabled" : ""}>Выполнить</button></div>`;
 }
 
 function renderLocationActions(p) {
   const job = JOBS[p.career.currentJobId];
   if (p.location === "home") {
     const teethHours = hoursSince(p.gameTime, p.meta.lastTeethAt);
-    const showerHours = hoursSince(p.gameTime, p.meta.lastShowerAt);
-    const dirty = p.houseNeeds?.dirtyDishes || 0;
     return [
-      actionBtn("Сон (8 часов)", "Оптимальное восстановление параметров.", "sleep8", 8 * 60),
-      actionBtn("Сон (2 часа)", "Быстрый отдых, слабый эффект.", "sleep2", 2 * 60),
-      actionBtn("Принять душ", `${showerHours > 30 ? "[!] " : ""}+гигиена, -стресс. Последний душ: ${showerHours} ч назад.`, "shower", 15),
       actionBtn("Почистить зубы", `${teethHours > 24 ? "[!] " : ""}+гигиена, +настроение. Последняя чистка: ${teethHours} ч назад.`, "teeth", 6),
-      actionBtn("Поесть", "Съесть продукт из запасов.", "eat", 20),
-      actionBtn("Помыть посуду", `${dirty > 0 ? "[!] " : ""}Грязной посуды: ${dirty}. ${dirty > 0 ? "Небольшой рост комфорта." : "Сейчас мыть нечего."}`, "dishes", 12, { disabled: dirty <= 0 }),
+      actionBtn("Поесть со стола", "Продукты размещаются на столе и управляются через предметы дома.", "eat", 20),
       actionBtn("Тренировка", "+здоровье, -стресс, -энергия", "workout", 45),
       actionBtn("Прогулка", "+настроение, +здоровье", "walk", 40),
+      `<small class="note">Сон, душ, мойка рук/посуды и готовка теперь запускаются через предметы в блоке «Дом и предметы».</small>`,
     ].join("");
   }
 
@@ -909,8 +989,7 @@ function doAction(rawKey) {
     for (const ci of p.shopCart) {
       if (ci.type === "food") {
         const f = SHOP_ITEMS.groceries.find((x) => x.id === ci.id);
-        const hasFridge = p.housing.items.some((i) => i.id === "fridge");
-        for (let i = 0; i < ci.qty; i++) p.food.stock.push(makeFoodItem(f, f.fridgePreferred && hasFridge ? "fridge" : "pantry"));
+        for (let i = 0; i < ci.qty; i++) p.food.stock.push(makeFoodItem(f, "table"));
       } else {
         const item = (ci.type === "appliance" ? SHOP_ITEMS.appliances : SHOP_ITEMS.home).find((x) => x.id === ci.id);
         addHousingItem(p, item);
@@ -924,17 +1003,88 @@ function doAction(rawKey) {
     return;
   }
 
+  if (rawKey.startsWith("moveToFridge:")) {
+    const foodId = rawKey.split(":")[1];
+    const food = p.food.stock.find((f) => f.id === foodId);
+    if (!food) return;
+    if (!p.housing.items.some((i) => i.id === "fridge")) return pushEvent(p, "Сначала купите холодильник.", "info", "shops");
+    food.storage = "fridge";
+    persistDB();
+    render();
+    return;
+  }
+  if (rawKey.startsWith("moveToTable:")) {
+    const foodId = rawKey.split(":")[1];
+    const food = p.food.stock.find((f) => f.id === foodId);
+    if (!food) return;
+    food.storage = "table";
+    persistDB();
+    render();
+    return;
+  }
+  if (rawKey.startsWith("eatFood:")) {
+    const foodId = rawKey.split(":")[1];
+    const idx = p.food.stock.findIndex((f) => f.id === foodId);
+    if (idx < 0) return;
+    const food = p.food.stock[idx];
+    p.food.stock.splice(idx, 1);
+    advanceGameMinutes(p, 20, `Приём пищи: ${food.name}`);
+    shiftStat(p, "hunger", food.satiety);
+    shiftStat(p, "mood", Math.round(food.nutrition / 5));
+    p.houseNeeds.dirtyDishes += 1;
+    p.houseNeeds.dirtySince = p.houseNeeds.dirtySince || p.gameTime;
+    persistDB();
+    render();
+    return;
+  }
+  if (rawKey.startsWith("cook:")) {
+    const [, applianceId, recipeId] = rawKey.split(":");
+    const recipe = COOKING_RECIPES.find((r) => r.id === recipeId);
+    if (!recipe || !recipe.appliances.includes(applianceId)) return;
+    const usedIndexes = [];
+    for (const ingredientId of recipe.ingredients) {
+      const idx = p.food.stock.findIndex((f, i) => !usedIndexes.includes(i) && f.id.startsWith(`${ingredientId}-`));
+      if (idx < 0) return pushEvent(p, `Не хватает ингредиентов для блюда «${recipe.name}».`, "info", "home");
+      usedIndexes.push(idx);
+    }
+    p.food.stock = p.food.stock.filter((_, i) => !usedIndexes.includes(i));
+    p.food.stock.push({
+      id: `meal-${recipe.id}-${Date.now()}`,
+      name: recipe.name,
+      price: 0,
+      satiety: recipe.satiety,
+      nutrition: recipe.nutrition,
+      daysLeft: 2.5,
+      fridgePreferred: true,
+      storage: "table",
+    });
+    advanceGameMinutes(p, recipe.minutes, `Приготовление: ${recipe.name}`);
+    shiftStat(p, "mood", 15);
+    consumeUtilitiesForAction(p, { powerUse: applianceId === "stove" ? 0.07 : 0.05, waterUse: 0.01 });
+    p.houseNeeds.dirtyDishes += 1;
+    p.houseNeeds.dirtySince = p.houseNeeds.dirtySince || p.gameTime;
+    pushEvent(p, `Блюдо готово: ${recipe.name}. Оно размещено на столе.`, "info", "home");
+    persistDB();
+    render();
+    return;
+  }
+  if (rawKey === "sleepCustom") {
+    const hoursRaw = prompt("Введите длительность сна в часах (например, 3.5):", "6");
+    const hours = Number(hoursRaw);
+    if (!Number.isFinite(hours) || hours <= 0) return;
+    return doAction(`sleep:${Math.round(hours * 60)}`);
+  }
+
   if (rawKey.startsWith("buyFood:")) {
     const id = rawKey.split(":")[1];
     const f = SHOP_ITEMS.groceries.find((x) => x.id === id);
     if (!f) return;
     if (p.money < f.price) return pushEvent(p, "Недостаточно денег.", "critical");
     p.money -= f.price;
-    const hasFridge = p.housing.items.some((i) => i.id === "fridge");
-    const storage = f.fridgePreferred && hasFridge ? "fridge" : "pantry";
+    const storage = "table";
     p.food.stock.push(makeFoodItem(f, storage));
     advanceGameMinutes(p, 15, `Покупка продукта: ${f.name}`);
-    pushEvent(p, `Куплено: ${f.name}. Размещение: ${storage === "fridge" ? "холодильник" : "полка"}.`, "info", "home");
+    pushEvent(p, `Куплено: ${f.name}. Размещение: ${storage === "fridge" ? "холодильник" : "стол"}.`, "info", "home");
     persistDB();
     render();
     return;
@@ -968,17 +1118,45 @@ function doAction(rawKey) {
     return;
   }
 
+  if (rawKey.startsWith("sleep:")) {
+    const minutes = Math.max(15, Number(rawKey.split(":")[1] || 0));
+    if (!Number.isFinite(minutes)) return;
+    const fx = sleepEffects(minutes);
+    advanceGameMinutes(p, minutes, `Сон (${fmtDuration(minutes)})`);
+    shiftStat(p, "energy", fx.energy);
+    shiftStat(p, "stress", fx.stress);
+    shiftStat(p, "health", fx.health);
+    shiftStat(p, "hunger", fx.hunger);
+    persistDB();
+    render();
+    return;
+  }
+
   switch (rawKey) {
     case "sleep8":
-      advanceGameMinutes(p, 8 * 60, "Сон 8 часов");
-      shiftStat(p, "energy", 330);
-      shiftStat(p, "stress", -180);
-      shiftStat(p, "health", 40);
-      break;
     case "sleep2":
-      advanceGameMinutes(p, 2 * 60, "Сон 2 часа");
-      shiftStat(p, "energy", 95);
-      shiftStat(p, "stress", -35);
+      return doAction(rawKey === "sleep8" ? "sleep:480" : "sleep:120");
+    case "washHands":
+      advanceGameMinutes(p, 2, "Мытьё рук");
+      shiftStat(p, "hygiene", 45);
+      shiftStat(p, "comfort", 8);
+      consumeUtilitiesForAction(p, { waterUse: 0.015 });
+      break;
+    case "sinkDishes":
+      return doAction("dishes");
+    case "dishwasherRun":
+      if ((p.houseNeeds?.dirtyDishes || 0) <= 0) {
+        pushEvent(p, "Грязной посуды нет — запуск не требуется.", "info", "home");
+        persistDB();
+        render();
+        return;
+      }
+      advanceGameMinutes(p, 9, "Запуск посудомоечной машины");
+      shiftStat(p, "comfort", 16);
+      shiftStat(p, "hygiene", 10);
+      consumeUtilitiesForAction(p, { waterUse: 0.03, powerUse: 0.03 });
+      p.houseNeeds.dirtyDishes = 0;
+      p.houseNeeds.dirtySince = null;
       break;
     case "shower":
       advanceGameMinutes(p, 15, "Душ");
@@ -995,16 +1173,14 @@ function doAction(rawKey) {
       consumeUtilitiesForAction(p, { waterUse: 0.02 });
       break;
     case "eat": {
-      const food = p.food.stock[0];
+      const food = p.food.stock.find((f) => f.storage === "table" || f.storage === "pantry") || p.food.stock[0];
       if (!food) return pushEvent(p, "Нет продуктов. Сходите в магазин.", "critical", "shops");
-      p.food.stock.shift();
+      p.food.stock = p.food.stock.filter((f) => f.id !== food.id);
       advanceGameMinutes(p, 20, `Приём пищи: ${food.name}`);
       shiftStat(p, "hunger", food.satiety);
       shiftStat(p, "mood", Math.round(food.nutrition / 6));
-      if (food.id.includes("chicken")) {
-        p.houseNeeds.dirtyDishes += 1;
-        p.houseNeeds.dirtySince = p.houseNeeds.dirtySince || p.gameTime;
-      }
+      p.houseNeeds.dirtyDishes += 1;
+      p.houseNeeds.dirtySince = p.houseNeeds.dirtySince || p.gameTime;
       break;
     }
     case "dishes": {
