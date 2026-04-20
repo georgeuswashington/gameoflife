@@ -632,7 +632,6 @@ function gameMarkup(p) {
     <div class="stat info datetime-progress">
       <div class="stat-head"><span>${fmtGameDate(p.gameTime)}</span><b>${fmtGameTime(p.gameTime)}</b></div>
       <div class="bar"><div class="bar-fill" style="width:${Math.round((dayProgress / 1000) * 100)}%"></div></div>
-      <div class="sub">Суточный прогресс</div>
     </div>
   `;
   return `
