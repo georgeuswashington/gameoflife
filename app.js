@@ -1,7 +1,8 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.29";
+const GAME_VERSION = "v0.30";
+const THEME_OPTIONS = ["light", "dark"];
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
@@ -211,6 +212,9 @@ function createProfile(name, difficulty = "normal") {
       randomEventsPerDayMax: 3,
       keyRate: 21,
     },
+    settings: {
+      theme: "light",
+    },
     meta: {
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
@@ -246,6 +250,8 @@ function getProfile() {
       : null;
   }
   p.meta = p.meta || {};
+  p.settings = p.settings || {};
+  if (!THEME_OPTIONS.includes(p.settings.theme)) p.settings.theme = "light";
   p.career = p.career || {};
   p.career.levels = p.career.levels || {};
   p.career.rep = p.career.rep || {};
@@ -515,6 +521,8 @@ function render() {
   captureScrollState();
   const app = document.getElementById("app");
   const p = getProfile();
+  const theme = p?.settings?.theme || "light";
+  document.documentElement.dataset.theme = theme;
   app.innerHTML = p ? gameMarkup(p) : authMarkup();
   bindHandlers();
   restoreScrollState();
@@ -962,6 +970,10 @@ function renderLocationActions(p) {
         <option value="2" ${p.speed === 2 ? "selected" : ""}>x2</option>
         <option value="5" ${p.speed === 5 ? "selected" : ""}>x5</option>
         <option value="10" ${p.speed === 10 ? "selected" : ""}>x10</option>
+      </select></div><div class="row"><label>Тема</label>
+      <select id="themeSelect">
+        <option value="light" ${p.settings.theme === "light" ? "selected" : ""}>Светлая</option>
+        <option value="dark" ${p.settings.theme === "dark" ? "selected" : ""}>Тёмная</option>
       </select></div>
       <div class="row"><button data-action="exportProfile">Экспорт профиля</button><button data-action="exportAll">Экспорт всех</button><button class="warn" data-action="logout">Выйти</button></div>
       </div>
@@ -1555,6 +1567,19 @@ function bindHandlers() {
       const p = getProfile();
       p.speed = Number(speedSelect.value);
       persistDB();
+    };
+  }
+
+  const themeSelect = app.querySelector("#themeSelect");
+  if (themeSelect) {
+    themeSelect.onchange = () => {
+      const p = getProfile();
+      if (!p) return;
+      const selected = THEME_OPTIONS.includes(themeSelect.value) ? themeSelect.value : "light";
+      p.settings.theme = selected;
+      document.documentElement.dataset.theme = selected;
+      persistDB();
+      render();
     };
   }
 
