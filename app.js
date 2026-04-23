@@ -1,7 +1,7 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.27";
+const GAME_VERSION = "v0.28";
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
@@ -61,15 +61,12 @@ const COOKING_RECIPES = [
 ];
 
 const LOCATIONS = [
-  { id: "home", icon: "🏠", label: "Дом" },
+  { id: "overview", icon: "🧭", label: "Обзор" },
+  { id: "tasks", icon: "✅", label: "Дела" },
   { id: "work", icon: "💼", label: "Работа" },
-  { id: "shops", icon: "🛒", label: "Магазины" },
-  { id: "utilities", icon: "🧾", label: "ЖКУ" },
-  { id: "bank", icon: "🏦", label: "Банк" },
-  { id: "jobs", icon: "📄", label: "Рынок труда" },
-  { id: "clinic", icon: "🏥", label: "Медицина" },
+  { id: "home", icon: "🏠", label: "Дом" },
+  { id: "finance", icon: "💳", label: "Финансы" },
   { id: "settings", icon: "🛠️", label: "Настройки" },
-  { id: "admin", icon: "⚙️", label: "Админ" },
 ];
 
 let db = loadDB();
@@ -151,7 +148,7 @@ function createProfile(name, difficulty = "normal") {
     difficulty,
     speed: DEFAULT_SPEED,
     gameTime: now.toISOString(),
-    location: "home",
+    location: "overview",
     money: DIFFICULTIES[difficulty].startMoney,
     stats: {
       hunger: 700,
@@ -258,6 +255,7 @@ function getProfile() {
   p.meta.lastTeethAt = p.meta.lastTeethAt || p.gameTime;
   p.meta.lastShowerAt = p.meta.lastShowerAt || p.gameTime;
   p.meta.showerHistory = Array.isArray(p.meta.showerHistory) ? p.meta.showerHistory : [];
+  p.location = normalizeLocationId(p.location);
   p.meta.teethBrushDayKey = p.meta.teethBrushDayKey || dayKey(p.gameTime);
   p.meta.teethBrushCount = Number.isFinite(p.meta.teethBrushCount) ? p.meta.teethBrushCount : 0;
   if (!p.housing?.items?.some((i) => i.id === "table")) {
@@ -266,6 +264,18 @@ function getProfile() {
     shiftStat(p, "comfort", 35);
   }
   return p;
+}
+
+function normalizeLocationId(locationId) {
+  const map = {
+    jobs: "work",
+    clinic: "tasks",
+    utilities: "tasks",
+    shops: "home",
+    bank: "finance",
+    admin: "settings",
+  };
+  return map[locationId] || (LOCATIONS.some((l) => l.id === locationId) ? locationId : "overview");
 }
 
 function monthKey(d) {
@@ -722,7 +732,7 @@ function gameMarkup(p) {
   <div class="game">
     <aside class="sidebar">
       ${LOCATIONS.map((l) => {
-        const button = `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}">${l.icon}</button>`;
+        const button = `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}" title="${l.label}">${l.icon}</button>`;
         if (l.id === "settings") return `${button}<div class="sidebar-version" title="Версия на основе текущего количества изменений в репозитории">Версия ${GAME_VERSION}</div>`;
         return button;
       }).join("")}
@@ -747,21 +757,15 @@ function gameMarkup(p) {
       <section class="layout">
         <section class="content-panel">
           <h3 style="margin-top:0">${loc}</h3>
-          <div class="action-list">${renderLocationActions(p)}</div>
+          ${p.location === "overview" ? renderScenarioDashboard(p) : `<div class="action-list">${renderLocationActions(p)}</div>`}
           ${p.location === "home" ? renderHomeItems(p) : ""}
         </section>
 
         <section class="feed compact-feed">
-          <h3 style="margin-top:0">Игровые события</h3>
-          ${p.logs.events.slice(0, 30).map((n) => `<div class="feed-item ${n.type} ${n.target ? "clickable" : ""}" ${n.target ? `data-go="${n.target}" title="Открыть раздел"` : ""}><div class="feed-item-row"><div>${n.text}</div>${n.target ? `<span class="feed-go-icon" aria-hidden="true">↗</span>` : ""}</div><div class="t">${new Date(n.ts).toLocaleString("ru-RU")}</div>${n.action ? `<button data-do="${n.action}">Выполнить</button>` : ""}</div>`).join("") || "<small class='note'>Пока пусто.</small>"}
-
-          <h3>Журнал действий</h3>
-          ${p.logs.actions.slice(0, 25).map((a) => `<div class="feed-item"><div>${a.text}</div><div class="t">${new Date(a.ts).toLocaleString("ru-RU")}</div></div>`).join("") || "<small class='note'>Нет записей.</small>"}
+          ${renderFeedAndHistory(p, p.location === "overview")}
         </section>
       </section>
     </main>
-
-    ${renderItemModal(p)}
   </div>`;
 }
 
@@ -770,19 +774,18 @@ function renderHomeItems(p) {
   return `
   <h4>Дом и предметы</h4>
   <div class="home-grid">
-    ${items.map((it) => `<button class="home-item" data-item="${it.id}">
+    ${items.map((it) => `<details class="home-item">
+      <summary>
       <div><b>${it.name}</b></div>
       <div class="dur-wrap"><div class="dur-fill" style="width:${Math.max(2, it.wear / 10)}%"></div></div>
       <small>Состояние: ${it.wear}/1000</small>
-    </button>`).join("")}
+      </summary>
+      <div class="inline-item-panel">${renderHomeItemInlinePanel(p, it)}</div>
+    </details>`).join("")}
   </div>`;
 }
 
-function renderItemModal(p) {
-  if (!uiState.modalItemId) return "";
-  const item = p.housing.items.find((x) => x.id === uiState.modalItemId);
-  if (!item) return "";
-
+function renderHomeItemInlinePanel(p, item) {
   let body = `<p>Состояние предмета: <b>${item.wear}/1000</b></p>`;
   if (item.id === "fridge") {
     const food = p.food.stock.filter((f) => f.storage === "fridge");
@@ -829,26 +832,35 @@ function renderItemModal(p) {
     }).join("")}`;
   }
 
-  return `<div class="modal-backdrop" data-closemodal="1"><div class="modal" onclick="event.stopPropagation()"><h3>${item.name}</h3>${body}<div class="row"><button data-closemodal="1">Закрыть</button></div></div></div>`;
+  return body;
 }
 
 function actionBtn(title, desc, key, minutes, options = {}) {
-  const { disabled = false } = options;
+  const { disabled = false, priority = "normal" } = options;
   const urgent = String(desc).includes("[!]");
   const safeDesc = String(desc).replace("[!]", "");
-  return `<div class="action-item ${urgent ? "urgent-item" : ""}"><div><b>${title}${minutes > 0 ? ` (${fmtDuration(minutes)})` : ""}</b><div style="color:var(--muted);font-size:13px">${safeDesc}</div></div><button class="${urgent ? "urgent-btn" : ""}" data-do="${key}" ${disabled ? "disabled" : ""}>Выполнить</button></div>`;
+  return `<div class="action-item ${urgent ? "urgent-item" : ""}" data-priority="${priority}"><div><b>${title}${minutes > 0 ? ` (${fmtDuration(minutes)})` : ""}</b><div style="color:var(--muted);font-size:13px">${safeDesc}</div></div><button class="${urgent ? "urgent-btn" : ""}" data-do="${key}" ${disabled ? "disabled" : ""}>Выполнить</button></div>`;
 }
 
 function renderLocationActions(p) {
+  const renderPrioritizedActions = (items) => {
+    const order = { critical: 0, urgent: 1, normal: 2 };
+    return [...items]
+      .sort((a, b) => (order[a.priority || "normal"] - order[b.priority || "normal"]))
+      .map((item) => actionBtn(item.title, item.desc, item.key, item.minutes, { disabled: item.disabled, priority: item.priority }))
+      .join("");
+  };
   const job = JOBS[p.career.currentJobId];
   if (p.location === "home") {
     const teethHours = hoursSince(p.gameTime, p.meta.lastTeethAt);
     const noEnergy = p.stats.energy <= 0;
     return [
-      actionBtn("Почистить зубы", `${teethHours > 24 ? "[!] " : ""}+гигиена, +настроение. Последняя чистка: ${teethHours} ч назад.`, "teeth", 6),
-      actionBtn("Поесть со стола", "Продукты размещаются на столе и управляются через предметы дома.", "eat", 20),
-      actionBtn("Тренировка", noEnergy ? "Недоступно при нулевой энергии." : "+здоровье, -стресс, -энергия", "workout", 45, { disabled: noEnergy }),
-      actionBtn("Прогулка", noEnergy ? "Недоступно при нулевой энергии." : "+настроение, +здоровье", "walk", 40, { disabled: noEnergy }),
+      renderPrioritizedActions([
+        { title: "Почистить зубы", desc: `${teethHours > 24 ? "[!] " : ""}+гигиена, +настроение. Последняя чистка: ${teethHours} ч назад.`, key: "teeth", minutes: 6, priority: teethHours > 24 ? "urgent" : "normal" },
+        { title: "Поесть со стола", desc: "Продукты размещаются на столе и управляются через предметы дома.", key: "eat", minutes: 20, priority: p.stats.hunger < 240 ? "critical" : "normal" },
+        { title: "Тренировка", desc: noEnergy ? "Недоступно при нулевой энергии." : "+здоровье, -стресс, -энергия", key: "workout", minutes: 45, disabled: noEnergy, priority: "normal" },
+        { title: "Прогулка", desc: noEnergy ? "Недоступно при нулевой энергии." : "+настроение, +здоровье", key: "walk", minutes: 40, disabled: noEnergy, priority: "normal" },
+      ]),
       `<small class="note">Сон, душ, мойка рук/посуды и готовка теперь запускаются через предметы в блоке «Дом и предметы».</small>`,
     ].join("");
   }
@@ -859,33 +871,16 @@ function renderLocationActions(p) {
     return [
       `<div class="job-status"><b>${job.name}</b><div>Накоплено к выплате: <b>${fmtMoney(p.career.accruedSalary)} €</b></div><div>До выплаты: <b>${daysToSalary(p)} дн.</b></div><div>Репутация: ${p.career.rep[p.career.currentJobId]} | Уровень: ${p.career.levels[p.career.currentJobId]}</div></div>`,
       `<div class="job-status"><b>Готовность к повышению (до уровня ${progress.nextLevel})</b><div style="margin-top:6px">Стаж на должности: ${Math.floor(progress.workedMinutes / 60)} ч / ${Math.floor(progress.minutesRequired / 60)} ч</div><div class="bar"><div class="bar-fill" style="width:${progress.timePct}%"></div></div><div style="margin-top:6px">Репутация: ${progress.rep} / ${progress.repRequired}</div><div class="bar"><div class="bar-fill" style="width:${progress.repPct}%"></div></div><small class="note">Повышение возможно при выполнении хотя бы одного условия.</small></div>`,
-      actionBtn("Работать 2 часа", noEnergy ? "Недоступно при нулевой энергии." : "Опыт и накопление к месячной зарплате.", "work2", 2 * 60, { disabled: noEnergy }),
-      actionBtn("Работать 8 часов", noEnergy ? "Недоступно при нулевой энергии." : "Основная смена.", "work8", 8 * 60, { disabled: noEnergy }),
-      actionBtn("Подать на повышение", "Требуется стаж на должности или достаточная репутация.", "promotion", 30),
+      renderPrioritizedActions([
+        { title: "Работать 2 часа", desc: noEnergy ? "Недоступно при нулевой энергии." : "Опыт и накопление к месячной зарплате.", key: "work2", minutes: 2 * 60, disabled: noEnergy, priority: p.stats.energy < 180 ? "urgent" : "normal" },
+        { title: "Работать 8 часов", desc: noEnergy ? "Недоступно при нулевой энергии." : "Основная смена.", key: "work8", minutes: 8 * 60, disabled: noEnergy, priority: "normal" },
+        { title: "Подать на повышение", desc: "Требуется стаж на должности или достаточная репутация.", key: "promotion", minutes: 30, priority: progress.eligible ? "urgent" : "normal" },
+      ]),
+      `<h4>Выбор работы</h4>${renderJobMarket(p)}`,
     ].join("");
   }
 
-  if (p.location === "shops") {
-    const owned = getOwnedItemIds(p);
-    const renderShopRow = (type, item, extra, disabled = false) => {
-      const qty = getCartQuantity(p, type, item.id);
-      return `<div class="shop-row ${disabled ? "shop-row-disabled" : ""}">
-        <div><b>${item.name}</b><div class="shop-note">${extra}</div></div>
-        <div class="shop-qty">
-          <button data-do="cartDec:${type}:${item.id}" ${qty <= 0 ? "disabled" : ""}>−</button>
-          <b>${qty}</b>
-          <button data-do="cartAdd:${type}:${item.id}" ${disabled ? "disabled" : ""}>+</button>
-          <span>${fmtMoney(item.price * qty)} €</span>
-        </div>
-      </div>`;
-    };
-    const groceries = SHOP_ITEMS.groceries.map((g) => renderShopRow("food", g, `${g.price} € / шт • Питательность ${g.nutrition}, срок ${g.shelfDays} дн.`)).join("");
-    const appliances = SHOP_ITEMS.appliances.map((it) => renderShopRow("appliance", it, `${it.price} € • Комфорт +${it.comfort || 0}${owned.has(it.id) ? " • Уже установлен" : ""}`, owned.has(it.id))).join("");
-    const homeGoods = SHOP_ITEMS.home.map((it) => renderShopRow("home", it, `${it.price} € • Комфорт +${it.comfort || 0}${owned.has(it.id) ? " • Уже есть дома" : ""}`, owned.has(it.id))).join("");
-    return `<div class="utility-card shop-cart-summary"><b>Корзина</b><div>Товаров: ${p.shopCart.reduce((s, x) => s + x.qty, 0)} | Сумма: ${fmtMoney(cartTotal(p))} €</div><div class="row"><button data-do="cartCheckout">Оформить покупку</button><button data-do="cartClear">Отменить всё</button></div></div><h4>Продукты</h4>${groceries}<h4>Бытовая техника</h4>${appliances}<h4>Всё для дома</h4>${homeGoods}`;
-  }
-
-  if (p.location === "utilities") {
+  if (p.location === "tasks") {
     const u = p.utilities;
     return `
     <div class="utility-card">
@@ -894,13 +889,17 @@ function renderLocationActions(p) {
       <div><b>Аренда</b>: долг ${fmtMoney(u.rent.debt)} €, статус договора: ${u.rent.active ? "активно" : "остановлено"}, просрочка ${u.rent.overdueDays} дн.</div>
       <small class="note">Вода и электричество начисляются в долг на начало следующего месяца.</small>
     </div>
-    ${actionBtn("Оплатить воду", "Погашение полного долга по воде.", "payWater", 8)}
-    ${actionBtn("Оплатить электричество", "Погашение полного долга по электроснабжению.", "payPower", 8)}
-    ${actionBtn("Оплатить аренду", "Погашение долга по аренде.", "payRent", 8)}
-    ${actionBtn("Оплатить всё", "Погашение всех задолженностей.", "payAllUtilities", 12)}`;
+    ${renderPrioritizedActions([
+      { title: "Оплатить всё", desc: "Погашение всех задолженностей.", key: "payAllUtilities", minutes: 12, priority: (u.water.debt + u.power.debt + u.rent.debt) > 0 ? "critical" : "normal" },
+      { title: "Оплатить воду", desc: "Погашение полного долга по воде.", key: "payWater", minutes: 8, priority: u.water.debt > 0 ? "urgent" : "normal" },
+      { title: "Оплатить электричество", desc: "Погашение полного долга по электроснабжению.", key: "payPower", minutes: 8, priority: u.power.debt > 0 ? "urgent" : "normal" },
+      { title: "Оплатить аренду", desc: "Погашение долга по аренде.", key: "payRent", minutes: 8, priority: u.rent.debt > 0 ? "urgent" : "normal" },
+      { title: "Поликлиника (200 €)", desc: "+здоровье, -стресс, медленно.", key: "clinic", minutes: 60, priority: p.stats.health < 300 ? "urgent" : "normal" },
+      { title: "Больница (900 €)", desc: "Сильное восстановление.", key: "hospital", minutes: 150, priority: p.stats.health < 180 ? "critical" : "normal" },
+    ])}`;
   }
 
-  if (p.location === "bank") {
+  if (p.location === "finance") {
     const dep = p.bank.deposit;
     const credit = p.bank.credit;
     const depositSummary = dep
@@ -912,31 +911,14 @@ function renderLocationActions(p) {
     return [
       depositSummary,
       creditSummary,
-      actionBtn("Взять кредит 1000 €", "Годовая ставка 18%.", "takeCredit", 15),
-      actionBtn("Погасить кредит 500 €", "Списывает из долга.", "payCredit", 10),
-      actionBtn("Открыть вклад 500 € на 3 мес", "Годовая ставка 8%.", "openDeposit:3", 10),
-      actionBtn("Открыть вклад 500 € на 6 мес", "Годовая ставка 8%.", "openDeposit:6", 10),
-      actionBtn("Открыть вклад 500 € на 12 мес", "Годовая ставка 8%.", "openDeposit:12", 10),
-      actionBtn("Закрыть вклад", "Возврат вклада на баланс.", "closeDeposit", 10),
-    ].join("");
-  }
-
-  if (p.location === "jobs") {
-    return Object.entries(JOBS).map(([id, j]) => {
-      const lvl = p.career.levels[id];
-      const rep = p.career.rep[id];
-      const playerRep = overallReputation(p);
-      const neededRepForCurrentLevel = getJobLevelRepRequirement(id, lvl);
-      const locked = playerRep < neededRepForCurrentLevel;
-      const levelRows = Array.from({ length: 10 }).map((_, idx) => `<div class="salary-row"><span>Уровень ${idx + 1}</span><span>мин. репутация ${getJobLevelRepRequirement(id, idx + 1)}</span><b>${fmtMoney(monthlySalaryForLevel(id, idx + 1))} €/мес</b></div>`).join("");
-      return `<details class="action-item job-card" data-job-card="${id}"><summary><b>${j.name}</b> — уровень ${lvl}, репутация ${rep}, доход ${fmtMoney(monthlySalaryForLevel(id, lvl))} €/мес ${locked ? `<span class="lock-badge">Нужно ${neededRepForCurrentLevel} репутации</span>` : ""}</summary><div style="color:var(--muted);font-size:13px;margin:6px 0">Тип: ${j.mode}${j.shift ? `, график: ${j.shift}` : ""}</div><div class="salary-grid">${levelRows}</div><div class="row"><button ${locked ? "disabled" : ""} data-job="${id}">${locked ? "Недоступно" : "Выбрать"}</button></div></details>`;
-    }).join("");
-  }
-
-  if (p.location === "clinic") {
-    return [
-      actionBtn("Поликлиника (200 €)", "+здоровье, -стресс, медленно.", "clinic", 60),
-      actionBtn("Больница (900 €)", "Сильное восстановление.", "hospital", 150),
+      renderPrioritizedActions([
+        { title: "Погасить кредит 500 €", desc: "Списывает из долга.", key: "payCredit", minutes: 10, priority: (credit?.balance || 0) > 0 ? "urgent" : "normal" },
+        { title: "Взять кредит 1000 €", desc: "Годовая ставка 18%.", key: "takeCredit", minutes: 15, priority: p.money < 100 ? "urgent" : "normal" },
+        { title: "Открыть вклад 500 € на 3 мес", desc: "Годовая ставка 8%.", key: "openDeposit:3", minutes: 10, priority: "normal" },
+        { title: "Открыть вклад 500 € на 6 мес", desc: "Годовая ставка 8%.", key: "openDeposit:6", minutes: 10, priority: "normal" },
+        { title: "Открыть вклад 500 € на 12 мес", desc: "Годовая ставка 8%.", key: "openDeposit:12", minutes: 10, priority: "normal" },
+        { title: "Закрыть вклад", desc: "Возврат вклада на баланс.", key: "closeDeposit", minutes: 10, priority: dep ? "urgent" : "normal" },
+      ]),
     ].join("");
   }
 
@@ -954,19 +936,74 @@ function renderLocationActions(p) {
     `;
   }
 
-  if (p.location === "admin") {
-    return `
-      <div class="admin-box">
-        <label>Инфляция в месяц: <input id="adminInfl" type="text" inputmode="decimal" value="${fmtNumber(p.admin.inflationMonthly, 3)}" /></label>
-        <label>Событий/день минимум: <input id="adminEvtMin" type="number" step="1" value="${p.admin.randomEventsPerDayMin}" /></label>
-        <label>Событий/день максимум: <input id="adminEvtMax" type="number" step="1" value="${p.admin.randomEventsPerDayMax}" /></label>
-        <label>Ключевая ставка ЦБ (%): <input id="adminRate" type="text" inputmode="decimal" value="${fmtNumber(p.admin.keyRate, 1)}" /></label>
-      </div>
-      ${actionBtn("Сохранить админ-настройки", "Применить параметры баланса.", "adminSave", 0)}
-      ${actionBtn("Сброс админ-настроек", "Сброс к значениям по умолчанию.", "adminReset", 0)}
-    `;
-  }
   return "";
+}
+
+function renderJobMarket(p) {
+  return Object.entries(JOBS).map(([id, j]) => {
+    const lvl = p.career.levels[id];
+    const rep = p.career.rep[id];
+    const playerRep = overallReputation(p);
+    const neededRepForCurrentLevel = getJobLevelRepRequirement(id, lvl);
+    const locked = playerRep < neededRepForCurrentLevel;
+    const levelRows = Array.from({ length: 10 }).map((_, idx) => `<div class="salary-row"><span>Уровень ${idx + 1}</span><span>мин. репутация ${getJobLevelRepRequirement(id, idx + 1)}</span><b>${fmtMoney(monthlySalaryForLevel(id, idx + 1))} €/мес</b></div>`).join("");
+    return `<details class="action-item job-card" data-job-card="${id}"><summary><b>${j.name}</b> — уровень ${lvl}, репутация ${rep}, доход ${fmtMoney(monthlySalaryForLevel(id, lvl))} €/мес ${locked ? `<span class="lock-badge">Нужно ${neededRepForCurrentLevel} репутации</span>` : ""}</summary><div style="color:var(--muted);font-size:13px;margin:6px 0">Тип: ${j.mode}${j.shift ? `, график: ${j.shift}` : ""}</div><div class="salary-grid">${levelRows}</div><div class="row"><button ${locked ? "disabled" : ""} data-job="${id}">${locked ? "Недоступно" : "Выбрать"}</button></div></details>`;
+  }).join("");
+}
+
+function renderScenarioDashboard(p) {
+  const criticalCards = [];
+  if (p.stats.hunger < 250) criticalCards.push({ title: "Голод критичен", text: `Голод: ${p.stats.hunger}/1000`, action: "eat" });
+  if (p.stats.energy < 220) criticalCards.push({ title: "Энергия на нуле", text: `Энергия: ${p.stats.energy}/1000`, action: "sleep:120" });
+  const utilityDebt = Math.round((p.utilities.water.debt || 0) + (p.utilities.power.debt || 0) + (p.utilities.rent.debt || 0));
+  if (utilityDebt > 0) criticalCards.push({ title: "Есть долги", text: `Сумма: ${fmtMoney(utilityDebt)} €`, action: "payAllUtilities" });
+  const latestCriticalEvent = p.logs.events.find((e) => e.type === "critical");
+  if (latestCriticalEvent) criticalCards.push({ title: "Критическое событие", text: latestCriticalEvent.text, action: latestCriticalEvent.action || "payAllUtilities" });
+  const critical = criticalCards.length ? criticalCards.slice(0, 4) : [{ title: "Критичных проблем нет", text: "Можно сфокусироваться на плане дня.", action: "work2" }];
+  const quickActions = [
+    { label: "Поесть", do: "eat", note: "Снять риск голода" },
+    { label: "Сон 2ч", do: "sleep:120", note: "Быстро восстановиться" },
+    { label: "Работа 2ч", do: "work2", note: "Доход и стаж" },
+    { label: "Оплатить всё", do: "payAllUtilities", note: "Закрыть долги" },
+    { label: "Погасить кредит", do: "payCredit", note: "Снизить давление" },
+    { label: "Тренировка", do: "workout", note: "Здоровье и стресс" },
+  ];
+  return `
+    <section>
+      <h4>Сейчас критично</h4>
+      <div class="action-list">${critical.map((item) => actionBtn(item.title, item.text, item.action, 0, { priority: "critical" })).join("")}</div>
+    </section>
+    <section>
+      <h4>Быстрые действия</h4>
+      <div class="action-list">${quickActions.map((item) => actionBtn(item.label, item.note, item.do, 0, { priority: "urgent" })).join("")}</div>
+    </section>
+    <section>
+      <h4>План на день</h4>
+      <div class="action-list">
+        ${actionBtn("Работа", "Смена + продвижение в карьере.", "work8", 8 * 60)}
+        ${actionBtn("Дом", "Сон, еда и бытовые дела.", "sleep:120", 120)}
+        ${actionBtn("Здоровье", "Проверка самочувствия и восстановление.", "clinic", 60)}
+        ${actionBtn("Финансы", "Долги, кредиты и подушка.", "payAllUtilities", 12)}
+      </div>
+    </section>
+  `;
+}
+
+function renderFeedAndHistory(p, secondary = false) {
+  const feedMarkup = `${p.logs.events.slice(0, 30).map((n) => `<div class="feed-item ${n.type} ${n.target ? "clickable" : ""}" ${n.target ? `data-go="${n.target}" title="Открыть раздел"` : ""}><div class="feed-item-row"><div>${n.text}</div>${n.target ? `<span class="feed-go-icon" aria-hidden="true">↗</span>` : ""}</div><div class="t">${new Date(n.ts).toLocaleString("ru-RU")}</div>${n.action ? `<button data-do="${n.action}">Выполнить</button>` : ""}</div>`).join("") || "<small class='note'>Пока пусто.</small>"}`;
+  const historyMarkup = `${p.logs.actions.slice(0, 25).map((a) => `<div class="feed-item"><div>${a.text}</div><div class="t">${new Date(a.ts).toLocaleString("ru-RU")}</div></div>`).join("") || "<small class='note'>Нет записей.</small>"}`;
+  if (!secondary) {
+    return `<h3 style="margin-top:0">Игровые события</h3>${feedMarkup}<h3>Журнал действий</h3>${historyMarkup}`;
+  }
+  return `
+    <details>
+      <summary><b>Лента и история</b> (вторично)</summary>
+      <h4>Игровые события</h4>
+      ${feedMarkup}
+      <h4>Журнал действий</h4>
+      ${historyMarkup}
+    </details>
+  `;
 }
 
 function advanceGameMinutes(profile, minutes, actionName = "") {
@@ -1490,7 +1527,7 @@ function bindHandlers() {
 
   app.querySelectorAll("[data-nav]").forEach((btn) => btn.onclick = () => {
     const p = getProfile();
-    p.location = btn.dataset.nav;
+    p.location = normalizeLocationId(btn.dataset.nav);
     uiState.forceTopOnRender = true;
     pushAction(p, `Переход в раздел: ${LOCATIONS.find((l) => l.id === p.location)?.label || p.location}.`);
     persistDB();
@@ -1519,19 +1556,9 @@ function bindHandlers() {
 
   app.querySelectorAll("[data-go]").forEach((btn) => btn.onclick = () => {
     const p = getProfile();
-    p.location = btn.dataset.go;
+    p.location = normalizeLocationId(btn.dataset.go);
     uiState.forceTopOnRender = true;
     persistDB();
-    render();
-  });
-
-  app.querySelectorAll("[data-item]").forEach((btn) => btn.onclick = () => {
-    uiState.modalItemId = btn.dataset.item;
-    render();
-  });
-
-  app.querySelectorAll("[data-closemodal]").forEach((btn) => btn.onclick = () => {
-    uiState.modalItemId = null;
     render();
   });
 
