@@ -1,4 +1,4 @@
-# Survive Life
+# Survive Life: Neon Reboot
 
 Минималистичная браузерная life-sim игра на русском языке.
 
