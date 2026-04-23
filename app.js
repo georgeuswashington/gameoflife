@@ -1,7 +1,7 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.28";
+const GAME_VERSION = "v0.29";
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
@@ -524,8 +524,9 @@ function authMarkup() {
   const list = Object.values(db.profiles).map((p) => `<option value="${p.id}">${p.name} — ${DIFFICULTIES[p.difficulty].label}</option>`).join("");
   return `
   <div class="auth-shell">
-    <div class="card">
-      <h1 class="auth-title">Survive Life</h1>
+    <div class="card auth-card">
+      <div class="auth-brand">SURVIVE LIFE // CITY SIM</div>
+      <h1 class="auth-title">Новая версия интерфейса управления жизнью</h1>
       <p class="auth-sub">Создайте профиль игрока или войдите в существующий. Каждый профиль хранит отдельное сохранение.</p>
 
       <div class="row">
@@ -711,6 +712,7 @@ function gameMarkup(p) {
   const loc = LOCATIONS.find((l) => l.id === p.location)?.label || p.location;
   const dayProgress = dayProgressValue(p.gameTime);
   const rep = overallReputation(p);
+  const currentJob = JOBS[p.career.currentJobId]?.name || "Безработный";
   const statsCompact = (uiState.scroll.windowY || 0) > 20 ? "compact" : "";
   const dateTimeTile = `
     <div class="stat info datetime-progress">
@@ -721,14 +723,26 @@ function gameMarkup(p) {
   return `
   <div class="game">
     <aside class="sidebar">
+      <div class="sidebar-brand">SL</div>
       ${LOCATIONS.map((l) => {
-        const button = `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}">${l.icon}</button>`;
+        const button = `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}"><span class="nav-icon">${l.icon}</span><span class="nav-label">${l.label}</span></button>`;
         if (l.id === "settings") return `${button}<div class="sidebar-version" title="Версия на основе текущего количества изменений в репозитории">Версия ${GAME_VERSION}</div>`;
         return button;
       }).join("")}
     </aside>
 
     <main class="main">
+      <section class="topbar">
+        <div class="topbar-title">
+          <h2>${p.name}</h2>
+          <small>Активная локация: ${loc}</small>
+        </div>
+        <div class="topbar-pills">
+          <span class="pill">Баланс: ${fmtMoney(p.money)} €</span>
+          <span class="pill">Работа: ${currentJob}</span>
+          <span class="pill">Репутация: ${rep}</span>
+        </div>
+      </section>
       <section class="stats ${statsCompact}" id="statsBar">
         <div class="stats-grid">
           ${statLine("Голод", p.stats.hunger)}
@@ -746,16 +760,16 @@ function gameMarkup(p) {
 
       <section class="layout">
         <section class="content-panel">
-          <h3 style="margin-top:0">${loc}</h3>
+          <h3 class="section-title">${loc}</h3>
           <div class="action-list">${renderLocationActions(p)}</div>
           ${p.location === "home" ? renderHomeItems(p) : ""}
         </section>
 
         <section class="feed compact-feed">
-          <h3 style="margin-top:0">Игровые события</h3>
+          <h3 class="section-title">Игровые события</h3>
           ${p.logs.events.slice(0, 30).map((n) => `<div class="feed-item ${n.type} ${n.target ? "clickable" : ""}" ${n.target ? `data-go="${n.target}" title="Открыть раздел"` : ""}><div class="feed-item-row"><div>${n.text}</div>${n.target ? `<span class="feed-go-icon" aria-hidden="true">↗</span>` : ""}</div><div class="t">${new Date(n.ts).toLocaleString("ru-RU")}</div>${n.action ? `<button data-do="${n.action}">Выполнить</button>` : ""}</div>`).join("") || "<small class='note'>Пока пусто.</small>"}
 
-          <h3>Журнал действий</h3>
+          <h3 class="section-title">Журнал действий</h3>
           ${p.logs.actions.slice(0, 25).map((a) => `<div class="feed-item"><div>${a.text}</div><div class="t">${new Date(a.ts).toLocaleString("ru-RU")}</div></div>`).join("") || "<small class='note'>Нет записей.</small>"}
         </section>
       </section>
@@ -768,10 +782,10 @@ function gameMarkup(p) {
 function renderHomeItems(p) {
   const items = p.housing.items;
   return `
-  <h4>Дом и предметы</h4>
+  <h4 class="section-title">Дом и предметы</h4>
   <div class="home-grid">
     ${items.map((it) => `<button class="home-item" data-item="${it.id}">
-      <div><b>${it.name}</b></div>
+      <div class="home-item-title"><b>${it.name}</b><span class="home-item-id">${it.id}</span></div>
       <div class="dur-wrap"><div class="dur-fill" style="width:${Math.max(2, it.wear / 10)}%"></div></div>
       <small>Состояние: ${it.wear}/1000</small>
     </button>`).join("")}
@@ -836,7 +850,7 @@ function actionBtn(title, desc, key, minutes, options = {}) {
   const { disabled = false } = options;
   const urgent = String(desc).includes("[!]");
   const safeDesc = String(desc).replace("[!]", "");
-  return `<div class="action-item ${urgent ? "urgent-item" : ""}"><div><b>${title}${minutes > 0 ? ` (${fmtDuration(minutes)})` : ""}</b><div style="color:var(--muted);font-size:13px">${safeDesc}</div></div><button class="${urgent ? "urgent-btn" : ""}" data-do="${key}" ${disabled ? "disabled" : ""}>Выполнить</button></div>`;
+  return `<div class="action-item ${urgent ? "urgent-item" : ""}"><div class="action-copy"><b>${title}</b>${minutes > 0 ? `<span class="duration-badge">${fmtDuration(minutes)}</span>` : ""}<div class="action-sub">${safeDesc}</div></div><button class="action-cta ${urgent ? "urgent-btn" : ""}" data-do="${key}" ${disabled ? "disabled" : ""}>Выполнить</button></div>`;
 }
 
 function renderLocationActions(p) {
