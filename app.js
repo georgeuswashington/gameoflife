@@ -1,7 +1,7 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.28";
+const GAME_VERSION = "v0.29";
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
@@ -87,6 +87,7 @@ const WORLD_SCENES = {
 let db = loadDB();
 let currentProfileId = db.lastProfileId || null;
 let popupTimeout = null;
+let world3d = null;
 let uiState = {
   modalItemId: null,
   scroll: {
@@ -524,6 +525,10 @@ function maybeTriggerRandomEvent(profile) {
 }
 
 function render() {
+  if (world3d) {
+    world3d.destroy();
+    world3d = null;
+  }
   captureScrollState();
   const app = document.getElementById("app");
   const p = getProfile();
@@ -727,38 +732,34 @@ function gameMarkup(p) {
   const rep = overallReputation(p);
   return `
   <div class="game">
-    <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">SL</span><span class="brand-copy">SURVIVE<small>LIFE SIMULATOR</small></span></div>
-      <nav class="world-nav" aria-label="Локации">
-        ${LOCATIONS.map((l) => `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}" title="${l.label}"><span>${l.icon}</span><b>${l.label}</b></button>`).join("")}
-      </nav>
-      <div class="sidebar-profile"><span class="avatar">${p.name.slice(0, 1).toUpperCase()}</span><div><b>${p.name}</b><small>${DIFFICULTIES[p.difficulty].label} · ${GAME_VERSION}</small></div></div>
-    </aside>
-
     <main class="main">
       <header class="top-hud">
-        <div class="location-crumb"><span>${currentLocation.icon}</span><div><small>ТЕКУЩАЯ ЛОКАЦИЯ</small><b>${loc}</b></div></div>
+        <div class="game-logo"><i></i><b>SURVIVE / LIFE</b><small>${GAME_VERSION}</small></div>
+        <div class="location-crumb"><span>${currentLocation.icon}</span><div><small>СЕЙЧАС</small><b>${loc}</b></div></div>
         <div class="hud-vitals">
-          <div title="Здоровье"><span>♥</span><b>${Math.round(p.stats.health / 10)}%</b></div>
-          <div title="Энергия"><span>ϟ</span><b>${Math.round(p.stats.energy / 10)}%</b></div>
-          <div title="Настроение"><span>☻</span><b>${Math.round(p.stats.mood / 10)}%</b></div>
+          <div title="Здоровье"><span>♥</span><b data-hud="health">${Math.round(p.stats.health / 10)}%</b></div>
+          <div title="Энергия"><span>ϟ</span><b data-hud="energy">${Math.round(p.stats.energy / 10)}%</b></div>
+          <div title="Настроение"><span>☻</span><b data-hud="mood">${Math.round(p.stats.mood / 10)}%</b></div>
         </div>
-        <div class="hud-balance"><small>БАЛАНС</small><b>${fmtMoney(p.money)} €</b></div>
-        <div class="hud-time"><small>${fmtGameDate(p.gameTime)}</small><b>${fmtGameTime(p.gameTime)}</b><div class="day-line"><i style="width:${Math.round((dayProgress / 1000) * 100)}%"></i></div></div>
+        <div class="hud-balance"><small>БАЛАНС</small><b data-hud="money">${fmtMoney(p.money)} €</b></div>
+        <div class="hud-time"><small data-hud="date">${fmtGameDate(p.gameTime)}</small><b data-hud="time">${fmtGameTime(p.gameTime)}</b><div class="day-line"><i data-hud="day" style="width:${Math.round((dayProgress / 1000) * 100)}%"></i></div></div>
       </header>
 
-      <section class="scene scene-${scene.tone}">
-        <div class="scene-sky"><i></i><i></i><i></i></div>
-        <div class="scene-city"><i></i><i></i><i></i><i></i><i></i></div>
-        <div class="scene-room">
-          <div class="scene-heading"><span>${scene.eyebrow}</span><h1>${scene.title}</h1><p>${scene.subtitle}</p></div>
-          <div class="scene-prop prop-a">${currentLocation.icon}</div>
-          <div class="scene-prop prop-b">${p.location === "home" ? "🪴" : p.location === "clinic" ? "✚" : p.location === "shops" ? "🛍️" : "◈"}</div>
-          ${p.location === "home" ? renderHomeItems(p) : `<button class="scene-focus" data-scroll-actions><span>${currentLocation.icon}</span><b>Подойти</b><small>Доступные действия</small></button>`}
-          <div class="character" aria-label="Персонаж ${p.name}"><div class="character-shadow"></div><div class="character-head"><i></i></div><div class="character-body"><i></i><i></i></div><div class="character-legs"><i></i><i></i></div><div class="character-name">${p.name}</div></div>
-          <div class="scene-ambience"><span>♫</span>${scene.ambience}</div>
+      <section class="scene scene-${scene.tone}" data-world-location="${p.location}">
+        <canvas id="worldCanvas" aria-label="Трёхмерная сцена: ${scene.title}"></canvas>
+        <div class="scene-vignette"></div>
+        <div class="scene-heading"><span>${scene.eyebrow}</span><h1>${scene.title}</h1><p>${scene.subtitle}</p></div>
+        <div class="control-hint"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><b>Двигаться</b><i></i><span><kbd>E</kbd></span><b>Действие</b></div>
+        <div class="player-tag"><i></i><b>${p.name}</b><small>${JOBS[p.career.currentJobId].name}</small></div>
+        <div class="scene-object-menu">
+          ${p.location === "home" ? renderHomeItems(p) : `<button data-scroll-actions><i>◆</i><span><b>Исследовать ${loc.toLowerCase()}</b><small>Подойти к точке взаимодействия</small></span><kbd>E</kbd></button>`}
         </div>
       </section>
+
+      <nav class="travel-dock" aria-label="Карта города">
+        <div class="travel-title"><small>КАРТА ГОРОДА</small><b>Куда направимся?</b></div>
+        <div class="travel-track">${LOCATIONS.map((l, i) => `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}"><i>${String(i + 1).padStart(2, "0")}</i><span>${l.icon}</span><b>${l.label}</b></button>`).join("")}</div>
+      </nav>
 
       <section class="layout">
         <section class="content-panel" id="locationActions">
@@ -783,9 +784,7 @@ function gameMarkup(p) {
 function renderHomeItems(p) {
   const items = p.housing.items;
   const visible = items.slice(0, 7);
-  return `<div class="object-layer" aria-label="Предметы квартиры">
-    ${visible.map((it, index) => `<button class="world-object object-${index + 1}" data-item="${it.id}" title="Подойти: ${it.name}"><span>${({ mattress: "🛏️", table: "🪑", lightbulb: "💡", sink: "🚰", shower: "🚿", fridge: "🧊", dishwasher: "▣", stove: "♨️", microwave: "▤", coffee: "☕", washer: "🫧", armchair: "🛋️", lamp: "🏮", shelf: "📚", carpet: "▰" })[it.id] || "◆"}</span><b>${it.name}</b><small>${Math.round(it.wear / 10)}% · взаимодействовать</small></button>`).join("")}
-  </div>`;
+  return visible.map((it, index) => `<button class="world-object" data-item="${it.id}" data-world-index="${index}"><i>${({ mattress: "▰", table: "◇", lightbulb: "✦", sink: "≈", shower: "≋", fridge: "▣", dishwasher: "▤", stove: "♨", microwave: "▥", coffee: "◒", washer: "◉", armchair: "◫", lamp: "⌁", shelf: "▦", carpet: "▬" })[it.id] || "◆"}</i><span><b>${it.name}</b><small>Состояние ${Math.round(it.wear / 10)}%</small></span><kbd>${index + 1}</kbd></button>`).join("");
 }
 
 function renderItemModal(p) {
@@ -1471,6 +1470,92 @@ function doWorkHours(hours) {
   pushEvent(p, `Рабочие часы учтены. К месячной выплате добавлено: ${fmtMoney(accrued)} €.`, "info", "work");
 }
 
+class World3D {
+  constructor(canvas, location) {
+    this.canvas = canvas;
+    this.location = location;
+    this.gl = canvas.getContext("webgl", { antialias: true, alpha: false });
+    this.keys = new Set();
+    this.player = { x: 0, z: 3, angle: Math.PI, step: 0 };
+    this.target = null;
+    this.objectCallback = null;
+    this.last = performance.now();
+    this.frame = 0;
+    if (!this.gl) {
+      canvas.classList.add("webgl-unavailable");
+      return;
+    }
+    this.onKeyDown = (e) => {
+      if (["w", "a", "s", "d"].includes(e.key.toLowerCase())) e.preventDefault();
+      this.keys.add(e.key.toLowerCase());
+      const n = Number(e.key);
+      if (n >= 1 && n <= 7) document.querySelector(`[data-world-index="${n - 1}"]`)?.click();
+      if (e.key.toLowerCase() === "e") document.querySelector(".scene-object-menu button")?.click();
+    };
+    this.onKeyUp = (e) => this.keys.delete(e.key.toLowerCase());
+    this.onPointer = (e) => {
+      const r = canvas.getBoundingClientRect();
+      const nx = (e.clientX - r.left) / r.width;
+      const ny = (e.clientY - r.top) / r.height;
+      this.target = [(nx - .5) * 16, (ny - .38) * 14];
+      this.objectCallback = null;
+    };
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("keyup", this.onKeyUp);
+    canvas.addEventListener("pointerdown", this.onPointer);
+    this.initGL();
+    this.resizeObserver = new ResizeObserver(() => this.resize());
+    this.resizeObserver.observe(canvas);
+    this.resize();
+    this.loop = (now) => {
+      this.update(Math.min(.04, (now - this.last) / 1000));
+      this.last = now;
+      this.draw(now / 1000);
+      this.frame = requestAnimationFrame(this.loop);
+    };
+    this.frame = requestAnimationFrame(this.loop);
+  }
+
+  initGL() {
+    const gl = this.gl;
+    const vertex = `attribute vec3 p; uniform mat4 mvp; uniform mat4 model; varying vec3 n; void main(){n=normalize(mat3(model)*p);gl_Position=mvp*vec4(p,1.0);}`;
+    const fragment = `precision mediump float; uniform vec3 color; varying vec3 n; void main(){float l=.48+.42*max(0.0,dot(normalize(n),normalize(vec3(.4,.8,.3))));gl_FragColor=vec4(color*l,1.0);}`;
+    const compile = (type, source) => { const s=gl.createShader(type); gl.shaderSource(s,source); gl.compileShader(s); return s; };
+    this.program = gl.createProgram();
+    gl.attachShader(this.program, compile(gl.VERTEX_SHADER, vertex));
+    gl.attachShader(this.program, compile(gl.FRAGMENT_SHADER, fragment));
+    gl.linkProgram(this.program); gl.useProgram(this.program);
+    const v = [-1,-1,-1, 1,-1,-1, 1,1,-1, -1,1,-1, -1,-1,1, 1,-1,1, 1,1,1, -1,1,1];
+    const ind = [0,1,2,0,2,3, 4,6,5,4,7,6, 0,4,5,0,5,1, 3,2,6,3,6,7, 1,5,6,1,6,2, 0,3,7,0,7,4];
+    this.vb=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,this.vb); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(v),gl.STATIC_DRAW);
+    this.ib=gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(ind),gl.STATIC_DRAW);
+    const pos=gl.getAttribLocation(this.program,"p"); gl.enableVertexAttribArray(pos); gl.vertexAttribPointer(pos,3,gl.FLOAT,false,0,0);
+    this.uMvp=gl.getUniformLocation(this.program,"mvp"); this.uModel=gl.getUniformLocation(this.program,"model"); this.uColor=gl.getUniformLocation(this.program,"color");
+    gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE);
+  }
+
+  resize() { const d=Math.min(2,devicePixelRatio||1); const w=Math.round(this.canvas.clientWidth*d),h=Math.round(this.canvas.clientHeight*d); if(w&&h&&(w!==this.canvas.width||h!==this.canvas.height)){this.canvas.width=w;this.canvas.height=h;} }
+  identity(){return [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]}
+  multiply(a,b){const o=new Array(16).fill(0);for(let c=0;c<4;c++)for(let r=0;r<4;r++)for(let k=0;k<4;k++)o[c*4+r]+=a[k*4+r]*b[c*4+k];return o}
+  perspective(fov,aspect,near,far){const f=1/Math.tan(fov/2),nf=1/(near-far);return [f/aspect,0,0,0,0,f,0,0,0,0,(far+near)*nf,-1,0,0,2*far*near*nf,0]}
+  lookAt(e,t,u=[0,1,0]){let z=this.norm([e[0]-t[0],e[1]-t[1],e[2]-t[2]]),x=this.norm(this.cross(u,z)),y=this.cross(z,x);return [x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-this.dot(x,e),-this.dot(y,e),-this.dot(z,e),1]}
+  norm(v){const l=Math.hypot(...v)||1;return v.map(x=>x/l)} cross(a,b){return[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]} dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]}
+  model(x,y,z,sx,sy,sz,ry=0){const c=Math.cos(ry),s=Math.sin(ry);return [c*sx,0,-s*sx,0,0,sy,0,0,s*sz,0,c*sz,0,x,y,z,1]}
+  cube(x,y,z,sx,sy,sz,color,ry=0){const gl=this.gl,m=this.model(x,y,z,sx,sy,sz,ry),mvp=this.multiply(this.vp,m);gl.uniformMatrix4fv(this.uModel,false,m);gl.uniformMatrix4fv(this.uMvp,false,mvp);gl.uniform3fv(this.uColor,color);gl.drawElements(gl.TRIANGLES,36,gl.UNSIGNED_SHORT,0)}
+  walkTo(index, callback){const spots=[[-5,1],[-2,-3],[4,-2],[6,2],[5,5],[-5,5],[1,6]];this.target=spots[index]||[0,0];this.objectCallback=callback}
+  update(dt){let dx=0,dz=0;if(this.keys.has("w"))dz-=1;if(this.keys.has("s"))dz+=1;if(this.keys.has("a"))dx-=1;if(this.keys.has("d"))dx+=1;if(dx||dz){this.target=null;const l=Math.hypot(dx,dz);dx/=l;dz/=l;this.player.x+=dx*dt*4;this.player.z+=dz*dt*4;this.player.angle=Math.atan2(dx,dz);this.player.step+=dt*10}else if(this.target){const dx=this.target[0]-this.player.x,dz=this.target[1]-this.player.z,d=Math.hypot(dx,dz);if(d<.22){this.target=null;const cb=this.objectCallback;this.objectCallback=null;if(cb)cb()}else{this.player.x+=dx/d*dt*4;this.player.z+=dz/d*dt*4;this.player.angle=Math.atan2(dx,dz);this.player.step+=dt*10}}this.player.x=Math.max(-8,Math.min(8,this.player.x));this.player.z=Math.max(-6,Math.min(8,this.player.z))}
+  draw(t){const gl=this.gl,w=this.canvas.width,h=this.canvas.height;gl.viewport(0,0,w,h);const palettes={home:[.045,.065,.105],work:[.035,.06,.11],shops:[.11,.045,.08],clinic:[.025,.09,.105],bank:[.075,.065,.045],jobs:[.04,.075,.09],utilities:[.07,.065,.055],settings:[.035,.035,.08],admin:[.015,.025,.055]};const bg=palettes[this.location]||palettes.home;gl.clearColor(...bg,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);const p=this.player;const eye=[p.x+9,8,p.z+12],target=[p.x,1.2,p.z];this.vp=this.multiply(this.perspective(.76,w/h,.1,100),this.lookAt(eye,target));
+    this.cube(0,-.35,1,10,.25,8,[.13,.15,.18]); this.cube(0,4,-7,10,4,.25,[.08,.12,.18]); this.cube(-9,3,1,.25,3.3,8,[.1,.13,.17]);
+    const sceneColors={home:[.18,.42,.38],work:[.17,.3,.55],shops:[.58,.18,.32],clinic:[.15,.55,.58],bank:[.52,.4,.16]};const ac=sceneColors[this.location]||[.25,.35,.5];
+    for(let i=0;i<7;i++){const spots=[[-6,.8,1],[-2,.55,-4],[4,.8,-3],[7,1,2],[6,1,6],[-6,1,6],[1,.8,7]][i];this.cube(spots[0],spots[1],spots[2],.9,spots[1],.8,ac,i*.3)}
+    for(let i=-7;i<8;i+=2)this.cube(i,2.5,-6.65,.65,2.2,.18,[.07+.02*(i%3),.16,.24]);
+    const moving=this.target||this.keys.has("w")||this.keys.has("a")||this.keys.has("s")||this.keys.has("d"),swing=moving?Math.sin(p.step)*.35:0;
+    this.cube(p.x,2.7,p.z,.38,.42,.38,[.68,.39,.27],p.angle);this.cube(p.x,1.72,p.z,.62,.62,.32,[.12,.43,.62],p.angle);this.cube(p.x-.34,1.65,p.z,.16,.6,.16,[.68,.39,.27],p.angle+swing);this.cube(p.x+.34,1.65,p.z,.16,.6,.16,[.68,.39,.27],p.angle-swing);this.cube(p.x-.25,.62,p.z,.2,.62,.22,[.06,.08,.12],p.angle-swing);this.cube(p.x+.25,.62,p.z,.2,.62,.22,[.06,.08,.12],p.angle+swing);
+    this.cube(0,.02,1,8.5,.015,.04,[.2+.06*Math.sin(t),.8,.58]);
+  }
+  destroy(){cancelAnimationFrame(this.frame);this.resizeObserver?.disconnect();window.removeEventListener("keydown",this.onKeyDown);window.removeEventListener("keyup",this.onKeyUp);this.canvas.removeEventListener("pointerdown",this.onPointer)}
+}
+
 function bindHandlers() {
   const app = document.getElementById("app");
 
@@ -1536,19 +1621,12 @@ function bindHandlers() {
   });
 
   app.querySelectorAll("[data-item]").forEach((btn) => btn.onclick = () => {
-    const character = app.querySelector(".character");
-    btn.classList.add("approaching");
-    if (character) {
-      const scene = app.querySelector(".scene-room");
-      const objectCenter = btn.offsetLeft + btn.offsetWidth / 2;
-      const destination = Math.max(70, Math.min((scene?.clientWidth || 0) - 110, objectCenter - 40));
-      character.classList.add("is-walking");
-      character.style.left = `${destination}px`;
-    }
-    window.setTimeout(() => {
+    const openItem = () => {
       uiState.modalItemId = btn.dataset.item;
       render();
-    }, 320);
+    };
+    if (world3d) world3d.walkTo(Number(btn.dataset.worldIndex || 0), openItem);
+    else openItem();
   });
 
   app.querySelectorAll("[data-scroll-actions]").forEach((btn) => btn.onclick = () => {
@@ -1612,6 +1690,8 @@ function bindHandlers() {
   };
   window.onscroll = syncScrollDependentUI;
   syncScrollDependentUI();
+  const canvas = app.querySelector("#worldCanvas");
+  if (canvas) world3d = new World3D(canvas, canvas.closest("[data-world-location]")?.dataset.worldLocation || "home");
 }
 
 function downloadJSON(name, obj) {
@@ -1632,6 +1712,20 @@ setInterval(() => {
   persistDB();
   const active = document.activeElement;
   if (active && active.id === "speedSelect") return;
+  if (world3d) {
+    const values = {
+      health: `${Math.round(p.stats.health / 10)}%`, energy: `${Math.round(p.stats.energy / 10)}%`,
+      mood: `${Math.round(p.stats.mood / 10)}%`, money: `${fmtMoney(p.money)} €`,
+      date: fmtGameDate(p.gameTime), time: fmtGameTime(p.gameTime),
+    };
+    Object.entries(values).forEach(([key, value]) => {
+      const node = document.querySelector(`[data-hud="${key}"]`);
+      if (node) node.textContent = value;
+    });
+    const day = document.querySelector('[data-hud="day"]');
+    if (day) day.style.width = `${Math.round(dayProgressValue(p.gameTime) / 10)}%`;
+    return;
+  }
   render();
 }, TICK_MS);
 
