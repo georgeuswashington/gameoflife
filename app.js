@@ -1,7 +1,7 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.27";
+const GAME_VERSION = "v0.28";
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
@@ -71,6 +71,18 @@ const LOCATIONS = [
   { id: "settings", icon: "🛠️", label: "Настройки" },
   { id: "admin", icon: "⚙️", label: "Админ" },
 ];
+
+const WORLD_SCENES = {
+  home: { eyebrow: "Тихий квартал · 14", title: "Моя квартира", subtitle: "Здесь можно восстановиться, приготовить еду и привести быт в порядок.", tone: "home", ambience: "За окном шуршит город. Дома спокойно." },
+  work: { eyebrow: "Деловой центр", title: "Рабочее место", subtitle: "Смена, команда и следующая ступень карьеры — всё начинается здесь.", tone: "work", ambience: "Офис живёт в ритме уведомлений и дедлайнов." },
+  shops: { eyebrow: "Торговая галерея", title: "Рынок у дома", subtitle: "Продукты, техника и вещи для пространства, в котором хочется жить.", tone: "shops", ambience: "Витрины светятся, а в воздухе пахнет свежим хлебом." },
+  utilities: { eyebrow: "Городской сервис", title: "Центр услуг", subtitle: "Счета, показания и важные бытовые обязательства в одном месте.", tone: "utilities", ambience: "Электронная очередь движется удивительно быстро." },
+  bank: { eyebrow: "Финансовый квартал", title: "Городской банк", subtitle: "Управляйте запасом денег, кредитом и долгосрочными планами.", tone: "bank", ambience: "В просторном зале тихо звучит музыка." },
+  jobs: { eyebrow: "Проспект возможностей", title: "Карьерный центр", subtitle: "Сравните вакансии и выберите направление следующего этапа жизни.", tone: "jobs", ambience: "На стенде появляются новые предложения." },
+  clinic: { eyebrow: "Медицинский кампус", title: "Клиника", subtitle: "Здоровье — ресурс, который стоит беречь до того, как он закончится.", tone: "clinic", ambience: "В холле светло и спокойно." },
+  settings: { eyebrow: "Вне игрового мира", title: "Центр управления", subtitle: "Скорость времени, сохранения и параметры текущей сессии.", tone: "settings", ambience: "Время здесь будто замедляется." },
+  admin: { eyebrow: "Служебный уровень", title: "Пульт симуляции", subtitle: "Тонкая настройка экономики и событий игрового мира.", tone: "admin", ambience: "Системы симуляции работают штатно." },
+};
 
 let db = loadDB();
 let currentProfileId = db.lastProfileId || null;
@@ -708,54 +720,57 @@ function cartTotal(p) {
 }
 
 function gameMarkup(p) {
-  const loc = LOCATIONS.find((l) => l.id === p.location)?.label || p.location;
+  const currentLocation = LOCATIONS.find((l) => l.id === p.location) || LOCATIONS[0];
+  const loc = currentLocation.label;
+  const scene = WORLD_SCENES[p.location] || WORLD_SCENES.home;
   const dayProgress = dayProgressValue(p.gameTime);
   const rep = overallReputation(p);
-  const statsCompact = (uiState.scroll.windowY || 0) > 20 ? "compact" : "";
-  const dateTimeTile = `
-    <div class="stat info datetime-progress">
-      <div class="stat-head"><span>${fmtGameDate(p.gameTime)}</span><b>${fmtGameTime(p.gameTime)}</b></div>
-      <div class="bar"><div class="bar-fill" style="width:${Math.round((dayProgress / 1000) * 100)}%"></div></div>
-    </div>
-  `;
   return `
   <div class="game">
     <aside class="sidebar">
-      ${LOCATIONS.map((l) => {
-        const button = `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}">${l.icon}</button>`;
-        if (l.id === "settings") return `${button}<div class="sidebar-version" title="Версия на основе текущего количества изменений в репозитории">Версия ${GAME_VERSION}</div>`;
-        return button;
-      }).join("")}
+      <div class="brand"><span class="brand-mark">SL</span><span class="brand-copy">SURVIVE<small>LIFE SIMULATOR</small></span></div>
+      <nav class="world-nav" aria-label="Локации">
+        ${LOCATIONS.map((l) => `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}" title="${l.label}"><span>${l.icon}</span><b>${l.label}</b></button>`).join("")}
+      </nav>
+      <div class="sidebar-profile"><span class="avatar">${p.name.slice(0, 1).toUpperCase()}</span><div><b>${p.name}</b><small>${DIFFICULTIES[p.difficulty].label} · ${GAME_VERSION}</small></div></div>
     </aside>
 
     <main class="main">
-      <section class="stats ${statsCompact}" id="statsBar">
-        <div class="stats-grid">
-          ${statLine("Голод", p.stats.hunger)}
-          ${statLine("Энергия", p.stats.energy)}
-          ${statLine("Настроение", p.stats.mood)}
-          ${statLine("Здоровье", p.stats.health)}
-          ${statLine("Стресс", p.stats.stress)}
-          ${statLine("Гигиена", p.stats.hygiene)}
-          ${statLine("Комфорт", p.stats.comfort)}
-          ${infoTile("Баланс", `${fmtMoney(p.money)} €`)}
-          ${dateTimeTile}
-          ${statLine("Репутация", rep)}
+      <header class="top-hud">
+        <div class="location-crumb"><span>${currentLocation.icon}</span><div><small>ТЕКУЩАЯ ЛОКАЦИЯ</small><b>${loc}</b></div></div>
+        <div class="hud-vitals">
+          <div title="Здоровье"><span>♥</span><b>${Math.round(p.stats.health / 10)}%</b></div>
+          <div title="Энергия"><span>ϟ</span><b>${Math.round(p.stats.energy / 10)}%</b></div>
+          <div title="Настроение"><span>☻</span><b>${Math.round(p.stats.mood / 10)}%</b></div>
+        </div>
+        <div class="hud-balance"><small>БАЛАНС</small><b>${fmtMoney(p.money)} €</b></div>
+        <div class="hud-time"><small>${fmtGameDate(p.gameTime)}</small><b>${fmtGameTime(p.gameTime)}</b><div class="day-line"><i style="width:${Math.round((dayProgress / 1000) * 100)}%"></i></div></div>
+      </header>
+
+      <section class="scene scene-${scene.tone}">
+        <div class="scene-sky"><i></i><i></i><i></i></div>
+        <div class="scene-city"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="scene-room">
+          <div class="scene-heading"><span>${scene.eyebrow}</span><h1>${scene.title}</h1><p>${scene.subtitle}</p></div>
+          <div class="scene-prop prop-a">${currentLocation.icon}</div>
+          <div class="scene-prop prop-b">${p.location === "home" ? "🪴" : p.location === "clinic" ? "✚" : p.location === "shops" ? "🛍️" : "◈"}</div>
+          ${p.location === "home" ? renderHomeItems(p) : `<button class="scene-focus" data-scroll-actions><span>${currentLocation.icon}</span><b>Подойти</b><small>Доступные действия</small></button>`}
+          <div class="character" aria-label="Персонаж ${p.name}"><div class="character-shadow"></div><div class="character-head"><i></i></div><div class="character-body"><i></i><i></i></div><div class="character-legs"><i></i><i></i></div><div class="character-name">${p.name}</div></div>
+          <div class="scene-ambience"><span>♫</span>${scene.ambience}</div>
         </div>
       </section>
 
       <section class="layout">
-        <section class="content-panel">
-          <h3 style="margin-top:0">${loc}</h3>
+        <section class="content-panel" id="locationActions">
+          <div class="panel-title"><div><span>ВЗАИМОДЕЙСТВИЕ</span><h2>Что будем делать?</h2></div><div class="rep-pill">Репутация <b>${rep}</b></div></div>
           <div class="action-list">${renderLocationActions(p)}</div>
-          ${p.location === "home" ? renderHomeItems(p) : ""}
         </section>
 
         <section class="feed compact-feed">
-          <h3 style="margin-top:0">Игровые события</h3>
+          <div class="panel-title"><div><span>ПРЯМО СЕЙЧАС</span><h2>Лента города</h2></div><i class="live-dot"></i></div>
           ${p.logs.events.slice(0, 30).map((n) => `<div class="feed-item ${n.type} ${n.target ? "clickable" : ""}" ${n.target ? `data-go="${n.target}" title="Открыть раздел"` : ""}><div class="feed-item-row"><div>${n.text}</div>${n.target ? `<span class="feed-go-icon" aria-hidden="true">↗</span>` : ""}</div><div class="t">${new Date(n.ts).toLocaleString("ru-RU")}</div>${n.action ? `<button data-do="${n.action}">Выполнить</button>` : ""}</div>`).join("") || "<small class='note'>Пока пусто.</small>"}
 
-          <h3>Журнал действий</h3>
+          <h3 class="feed-subtitle">История действий</h3>
           ${p.logs.actions.slice(0, 25).map((a) => `<div class="feed-item"><div>${a.text}</div><div class="t">${new Date(a.ts).toLocaleString("ru-RU")}</div></div>`).join("") || "<small class='note'>Нет записей.</small>"}
         </section>
       </section>
@@ -767,14 +782,9 @@ function gameMarkup(p) {
 
 function renderHomeItems(p) {
   const items = p.housing.items;
-  return `
-  <h4>Дом и предметы</h4>
-  <div class="home-grid">
-    ${items.map((it) => `<button class="home-item" data-item="${it.id}">
-      <div><b>${it.name}</b></div>
-      <div class="dur-wrap"><div class="dur-fill" style="width:${Math.max(2, it.wear / 10)}%"></div></div>
-      <small>Состояние: ${it.wear}/1000</small>
-    </button>`).join("")}
+  const visible = items.slice(0, 7);
+  return `<div class="object-layer" aria-label="Предметы квартиры">
+    ${visible.map((it, index) => `<button class="world-object object-${index + 1}" data-item="${it.id}" title="Подойти: ${it.name}"><span>${({ mattress: "🛏️", table: "🪑", lightbulb: "💡", sink: "🚰", shower: "🚿", fridge: "🧊", dishwasher: "▣", stove: "♨️", microwave: "▤", coffee: "☕", washer: "🫧", armchair: "🛋️", lamp: "🏮", shelf: "📚", carpet: "▰" })[it.id] || "◆"}</span><b>${it.name}</b><small>${Math.round(it.wear / 10)}% · взаимодействовать</small></button>`).join("")}
   </div>`;
 }
 
@@ -1526,8 +1536,23 @@ function bindHandlers() {
   });
 
   app.querySelectorAll("[data-item]").forEach((btn) => btn.onclick = () => {
-    uiState.modalItemId = btn.dataset.item;
-    render();
+    const character = app.querySelector(".character");
+    btn.classList.add("approaching");
+    if (character) {
+      const scene = app.querySelector(".scene-room");
+      const objectCenter = btn.offsetLeft + btn.offsetWidth / 2;
+      const destination = Math.max(70, Math.min((scene?.clientWidth || 0) - 110, objectCenter - 40));
+      character.classList.add("is-walking");
+      character.style.left = `${destination}px`;
+    }
+    window.setTimeout(() => {
+      uiState.modalItemId = btn.dataset.item;
+      render();
+    }, 320);
+  });
+
+  app.querySelectorAll("[data-scroll-actions]").forEach((btn) => btn.onclick = () => {
+    app.querySelector("#locationActions")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   app.querySelectorAll("[data-closemodal]").forEach((btn) => btn.onclick = () => {
