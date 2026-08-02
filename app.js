@@ -1,7 +1,7 @@
 const SAVE_KEY = "survive-life-v2";
 const TICK_MS = 1000;
 const DEFAULT_SPEED = 1;
-const GAME_VERSION = "v0.29";
+const GAME_VERSION = "v0.30";
 
 const DIFFICULTIES = {
   easy: { label: "Легко", startMoney: 20000 },
@@ -96,6 +96,7 @@ let uiState = {
     wasAtBottom: false,
   },
   expandedJobCards: [],
+  shopTab: "groceries",
   forceTopOnRender: false,
 };
 
@@ -748,43 +749,29 @@ function gameMarkup(p) {
       <section class="scene scene-${scene.tone}" data-world-location="${p.location}">
         <canvas id="worldCanvas" aria-label="Трёхмерная сцена: ${scene.title}"></canvas>
         <div class="scene-vignette"></div>
-        <div class="scene-heading"><span>${scene.eyebrow}</span><h1>${scene.title}</h1><p>${scene.subtitle}</p></div>
+        <div class="scene-heading"><span>${scene.eyebrow}</span><h1>${scene.title}</h1></div>
         <div class="control-hint"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><b>Двигаться</b><i></i><span><kbd>E</kbd></span><b>Действие</b></div>
         <div class="player-tag"><i></i><b>${p.name}</b><small>${JOBS[p.career.currentJobId].name}</small></div>
-        <div class="scene-object-menu">
-          ${p.location === "home" ? renderHomeItems(p) : `<button data-scroll-actions><i>◆</i><span><b>Исследовать ${loc.toLowerCase()}</b><small>Подойти к точке взаимодействия</small></span><kbd>E</kbd></button>`}
-        </div>
-      </section>
-
-      <nav class="travel-dock" aria-label="Карта города">
-        <div class="travel-title"><small>КАРТА ГОРОДА</small><b>Куда направимся?</b></div>
-        <div class="travel-track">${LOCATIONS.map((l, i) => `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}"><i>${String(i + 1).padStart(2, "0")}</i><span>${l.icon}</span><b>${l.label}</b></button>`).join("")}</div>
-      </nav>
-
-      <section class="layout">
-        <section class="content-panel" id="locationActions">
-          <div class="panel-title"><div><span>ВЗАИМОДЕЙСТВИЕ</span><h2>Что будем делать?</h2></div><div class="rep-pill">Репутация <b>${rep}</b></div></div>
-          <div class="action-list">${renderLocationActions(p)}</div>
-        </section>
-
-        <section class="feed compact-feed">
-          <div class="panel-title"><div><span>ПРЯМО СЕЙЧАС</span><h2>Лента города</h2></div><i class="live-dot"></i></div>
-          ${p.logs.events.slice(0, 30).map((n) => `<div class="feed-item ${n.type} ${n.target ? "clickable" : ""}" ${n.target ? `data-go="${n.target}" title="Открыть раздел"` : ""}><div class="feed-item-row"><div>${n.text}</div>${n.target ? `<span class="feed-go-icon" aria-hidden="true">↗</span>` : ""}</div><div class="t">${new Date(n.ts).toLocaleString("ru-RU")}</div>${n.action ? `<button data-do="${n.action}">Выполнить</button>` : ""}</div>`).join("") || "<small class='note'>Пока пусто.</small>"}
-
-          <h3 class="feed-subtitle">История действий</h3>
-          ${p.logs.actions.slice(0, 25).map((a) => `<div class="feed-item"><div>${a.text}</div><div class="t">${new Date(a.ts).toLocaleString("ru-RU")}</div></div>`).join("") || "<small class='note'>Нет записей.</small>"}
-        </section>
+        <div class="world-hotspots">${p.location === "home" ? renderHomeItems(p) : `<button class="world-hotspot location-hotspot" data-anchor-index="3" data-world-action><i>${currentLocation.icon}</i><span><b>${loc}</b><small>Коснитесь для взаимодействия</small></span></button>`}</div>
+        ${p.location === "home" ? `<button class="world-hotspot player-actions" data-scroll-actions><i>●</i><span><b>Действия ${p.name}</b><small>Уход, еда и активность</small></span></button>` : ""}
+        <aside class="context-card location-context ${p.location === "home" ? "is-home" : ""}" id="locationActions">
+          <header><span>${currentLocation.icon}</span><div><small>ДЕЙСТВИЯ</small><b>${p.location === "home" ? p.name : loc}</b></div><em>REP ${rep}</em></header>
+          <div class="context-actions">${renderLocationActions(p)}</div>
+        </aside>
+        ${renderItemModal(p)}
+        <div class="event-toast ${p.logs.events[0]?.type || ""}"><i></i><span><small>ПОСЛЕДНЕЕ СОБЫТИЕ</small><b>${p.logs.events[0]?.text || "Город живёт своей жизнью."}</b></span></div>
+        <nav class="travel-dock" aria-label="Карта города">
+          ${LOCATIONS.map((l) => `<button class="${l.id === p.location ? "active" : ""}" data-nav="${l.id}" title="${l.label}"><span>${l.icon}</span><b>${l.label}</b></button>`).join("")}
+        </nav>
       </section>
     </main>
-
-    ${renderItemModal(p)}
   </div>`;
 }
 
 function renderHomeItems(p) {
   const items = p.housing.items;
   const visible = items.slice(0, 7);
-  return visible.map((it, index) => `<button class="world-object" data-item="${it.id}" data-world-index="${index}"><i>${({ mattress: "▰", table: "◇", lightbulb: "✦", sink: "≈", shower: "≋", fridge: "▣", dishwasher: "▤", stove: "♨", microwave: "▥", coffee: "◒", washer: "◉", armchair: "◫", lamp: "⌁", shelf: "▦", carpet: "▬" })[it.id] || "◆"}</i><span><b>${it.name}</b><small>Состояние ${Math.round(it.wear / 10)}%</small></span><kbd>${index + 1}</kbd></button>`).join("");
+  return visible.map((it, index) => `<button class="world-hotspot" data-item="${it.id}" data-world-index="${index}" data-anchor-index="${index}"><i>${({ mattress: "▰", table: "◇", lightbulb: "✦", sink: "≈", shower: "≋", fridge: "▣", dishwasher: "▤", stove: "♨", microwave: "▥", coffee: "◒", washer: "◉", armchair: "◫", lamp: "⌁", shelf: "▦", carpet: "▬" })[it.id] || "◆"}</i><span><b>${it.name}</b><small>${Math.round(it.wear / 10)}% · коснуться</small></span></button>`).join("");
 }
 
 function renderItemModal(p) {
@@ -838,7 +825,8 @@ function renderItemModal(p) {
     }).join("")}`;
   }
 
-  return `<div class="modal-backdrop" data-closemodal="1"><div class="modal" onclick="event.stopPropagation()"><h3>${item.name}</h3>${body}<div class="row"><button data-closemodal="1">Закрыть</button></div></div></div>`;
+  const objectIndex = Math.max(0, p.housing.items.slice(0, 7).findIndex((x) => x.id === item.id));
+  return `<aside class="context-card object-context" data-context-index="${objectIndex}"><header><span>◆</span><div><small>ОБЪЕКТ</small><b>${item.name}</b></div><button data-closemodal="1" aria-label="Закрыть">×</button></header><div class="context-actions">${body}</div></aside>`;
 }
 
 function actionBtn(title, desc, key, minutes, options = {}) {
@@ -891,7 +879,9 @@ function renderLocationActions(p) {
     const groceries = SHOP_ITEMS.groceries.map((g) => renderShopRow("food", g, `${g.price} € / шт • Питательность ${g.nutrition}, срок ${g.shelfDays} дн.`)).join("");
     const appliances = SHOP_ITEMS.appliances.map((it) => renderShopRow("appliance", it, `${it.price} € • Комфорт +${it.comfort || 0}${owned.has(it.id) ? " • Уже установлен" : ""}`, owned.has(it.id))).join("");
     const homeGoods = SHOP_ITEMS.home.map((it) => renderShopRow("home", it, `${it.price} € • Комфорт +${it.comfort || 0}${owned.has(it.id) ? " • Уже есть дома" : ""}`, owned.has(it.id))).join("");
-    return `<div class="utility-card shop-cart-summary"><b>Корзина</b><div>Товаров: ${p.shopCart.reduce((s, x) => s + x.qty, 0)} | Сумма: ${fmtMoney(cartTotal(p))} €</div><div class="row"><button data-do="cartCheckout">Оформить покупку</button><button data-do="cartClear">Отменить всё</button></div></div><h4>Продукты</h4>${groceries}<h4>Бытовая техника</h4>${appliances}<h4>Всё для дома</h4>${homeGoods}`;
+    const tabs = `<div class="context-tabs"><button class="${uiState.shopTab === "groceries" ? "active" : ""}" data-shop-tab="groceries">Еда</button><button class="${uiState.shopTab === "appliances" ? "active" : ""}" data-shop-tab="appliances">Техника</button><button class="${uiState.shopTab === "home" ? "active" : ""}" data-shop-tab="home">Для дома</button></div>`;
+    const activeGoods = uiState.shopTab === "appliances" ? appliances : uiState.shopTab === "home" ? homeGoods : groceries;
+    return `<div class="utility-card shop-cart-summary"><b>Корзина · ${p.shopCart.reduce((s, x) => s + x.qty, 0)} шт. · ${fmtMoney(cartTotal(p))} €</b><div class="row"><button data-do="cartCheckout">Купить</button><button data-do="cartClear">Очистить</button></div></div>${tabs}${activeGoods}`;
   }
 
   if (p.location === "utilities") {
@@ -1490,7 +1480,7 @@ class World3D {
       this.keys.add(e.key.toLowerCase());
       const n = Number(e.key);
       if (n >= 1 && n <= 7) document.querySelector(`[data-world-index="${n - 1}"]`)?.click();
-      if (e.key.toLowerCase() === "e") document.querySelector(".scene-object-menu button")?.click();
+      if (e.key.toLowerCase() === "e") document.querySelector(".world-hotspot")?.click();
     };
     this.onKeyUp = (e) => this.keys.delete(e.key.toLowerCase());
     this.onPointer = (e) => {
@@ -1499,6 +1489,7 @@ class World3D {
       const ny = (e.clientY - r.top) / r.height;
       this.target = [(nx - .5) * 16, (ny - .38) * 14];
       this.objectCallback = null;
+      document.querySelector("#locationActions")?.classList.remove("open");
     };
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
@@ -1542,6 +1533,8 @@ class World3D {
   norm(v){const l=Math.hypot(...v)||1;return v.map(x=>x/l)} cross(a,b){return[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]} dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]}
   model(x,y,z,sx,sy,sz,ry=0){const c=Math.cos(ry),s=Math.sin(ry);return [c*sx,0,-s*sx,0,0,sy,0,0,s*sz,0,c*sz,0,x,y,z,1]}
   cube(x,y,z,sx,sy,sz,color,ry=0){const gl=this.gl,m=this.model(x,y,z,sx,sy,sz,ry),mvp=this.multiply(this.vp,m);gl.uniformMatrix4fv(this.uModel,false,m);gl.uniformMatrix4fv(this.uMvp,false,mvp);gl.uniform3fv(this.uColor,color);gl.drawElements(gl.TRIANGLES,36,gl.UNSIGNED_SHORT,0)}
+  project(point){const m=this.vp,x=point[0],y=point[1],z=point[2],w=m[3]*x+m[7]*y+m[11]*z+m[15];return {x:(m[0]*x+m[4]*y+m[8]*z+m[12])/w,y:(m[1]*x+m[5]*y+m[9]*z+m[13])/w,w}}
+  updateAnchors(){const spots=[[-6,1.8,1],[-2,1.4,-4],[4,1.8,-3],[7,2.1,2],[6,2.1,6],[-6,2.1,6],[1,1.8,7]];const rect=this.canvas.getBoundingClientRect();document.querySelectorAll("[data-anchor-index]").forEach((el)=>{const index=Number(el.dataset.anchorIndex||0),pt=this.project(spots[index]||spots[0]);el.style.left=`${(pt.x*.5+.5)*rect.width}px`;el.style.top=`${(-pt.y*.5+.5)*rect.height}px`;el.classList.toggle("behind-camera",pt.w<=0)});const context=document.querySelector("[data-context-index]");if(context){const pt=this.project(spots[Number(context.dataset.contextIndex)]||spots[0]);const x=Math.max(12,Math.min(rect.width-330,(pt.x*.5+.5)*rect.width+35));const y=Math.max(80,Math.min(rect.height-390,(-pt.y*.5+.5)*rect.height-80));context.style.left=`${x}px`;context.style.top=`${y}px`}}
   walkTo(index, callback){const spots=[[-5,1],[-2,-3],[4,-2],[6,2],[5,5],[-5,5],[1,6]];this.target=spots[index]||[0,0];this.objectCallback=callback}
   update(dt){let dx=0,dz=0;if(this.keys.has("w"))dz-=1;if(this.keys.has("s"))dz+=1;if(this.keys.has("a"))dx-=1;if(this.keys.has("d"))dx+=1;if(dx||dz){this.target=null;const l=Math.hypot(dx,dz);dx/=l;dz/=l;this.player.x+=dx*dt*4;this.player.z+=dz*dt*4;this.player.angle=Math.atan2(dx,dz);this.player.step+=dt*10}else if(this.target){const dx=this.target[0]-this.player.x,dz=this.target[1]-this.player.z,d=Math.hypot(dx,dz);if(d<.22){this.target=null;const cb=this.objectCallback;this.objectCallback=null;if(cb)cb()}else{this.player.x+=dx/d*dt*4;this.player.z+=dz/d*dt*4;this.player.angle=Math.atan2(dx,dz);this.player.step+=dt*10}}this.player.x=Math.max(-8,Math.min(8,this.player.x));this.player.z=Math.max(-6,Math.min(8,this.player.z))}
   draw(t){const gl=this.gl,w=this.canvas.width,h=this.canvas.height;gl.viewport(0,0,w,h);const palettes={home:[.045,.065,.105],work:[.035,.06,.11],shops:[.11,.045,.08],clinic:[.025,.09,.105],bank:[.075,.065,.045],jobs:[.04,.075,.09],utilities:[.07,.065,.055],settings:[.035,.035,.08],admin:[.015,.025,.055]};const bg=palettes[this.location]||palettes.home;gl.clearColor(...bg,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);const p=this.player;const eye=[p.x+9,8,p.z+12],target=[p.x,1.2,p.z];this.vp=this.multiply(this.perspective(.76,w/h,.1,100),this.lookAt(eye,target));
@@ -1552,6 +1545,7 @@ class World3D {
     const moving=this.target||this.keys.has("w")||this.keys.has("a")||this.keys.has("s")||this.keys.has("d"),swing=moving?Math.sin(p.step)*.35:0;
     this.cube(p.x,2.7,p.z,.38,.42,.38,[.68,.39,.27],p.angle);this.cube(p.x,1.72,p.z,.62,.62,.32,[.12,.43,.62],p.angle);this.cube(p.x-.34,1.65,p.z,.16,.6,.16,[.68,.39,.27],p.angle+swing);this.cube(p.x+.34,1.65,p.z,.16,.6,.16,[.68,.39,.27],p.angle-swing);this.cube(p.x-.25,.62,p.z,.2,.62,.22,[.06,.08,.12],p.angle-swing);this.cube(p.x+.25,.62,p.z,.2,.62,.22,[.06,.08,.12],p.angle+swing);
     this.cube(0,.02,1,8.5,.015,.04,[.2+.06*Math.sin(t),.8,.58]);
+    this.updateAnchors();
   }
   destroy(){cancelAnimationFrame(this.frame);this.resizeObserver?.disconnect();window.removeEventListener("keydown",this.onKeyDown);window.removeEventListener("keyup",this.onKeyUp);this.canvas.removeEventListener("pointerdown",this.onPointer)}
 }
@@ -1594,6 +1588,12 @@ function bindHandlers() {
 
   app.querySelectorAll("[data-do]").forEach((btn) => btn.onclick = () => doAction(btn.dataset.do));
 
+  app.querySelectorAll("[data-shop-tab]").forEach((btn) => btn.onclick = () => {
+    uiState.shopTab = btn.dataset.shopTab;
+    render();
+    document.querySelector("#locationActions")?.classList.add("open");
+  });
+
   app.querySelectorAll("[data-job]").forEach((btn) => btn.onclick = () => {
     const p = getProfile();
     const targetJobId = btn.dataset.job;
@@ -1630,7 +1630,13 @@ function bindHandlers() {
   });
 
   app.querySelectorAll("[data-scroll-actions]").forEach((btn) => btn.onclick = () => {
-    app.querySelector("#locationActions")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    app.querySelector("#locationActions")?.classList.toggle("open");
+  });
+
+  app.querySelectorAll("[data-world-action]").forEach((btn) => btn.onclick = () => {
+    const showActions = () => app.querySelector("#locationActions")?.classList.add("open");
+    if (world3d) world3d.walkTo(Number(btn.dataset.anchorIndex || 3), showActions);
+    else showActions();
   });
 
   app.querySelectorAll("[data-closemodal]").forEach((btn) => btn.onclick = () => {
